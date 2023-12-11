@@ -10,6 +10,7 @@ pub fn build(b: *std.Build) void {
         .target = .{ .abi = .eabihf, .cpu_arch = .arm, .os_tag = .freestanding },
         .optimize = optimize,
     });
+    exe.addAssemblyFile(.{.path = "load.S"});
     exe.setLinkerScript(.{ .path = "linker.ld" });
     b.installArtifact(exe);
 

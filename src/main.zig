@@ -1,11 +1,8 @@
 const root = @import("root.zig");
-
-export fn _start() void {
-    asm volatile ("ldr sp, =0xE0000000"); // stack pointer at the end of available DDR
-    asm volatile ("bl main");
-    asm volatile ("b .");
-}
+const uart = @import("uart.zig");
+const printf = uart.printf;
 
 export fn main() u8 {
+    try printf("{s}", .{"Hello, world!\n"});
     return @intCast(root.add(2,3));
 }
