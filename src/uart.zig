@@ -8,7 +8,7 @@ pub fn printf(comptime fmt: []const u8, args: anytype) !void {
     nosuspend uart_writer.print(fmt, args) catch return;
 }
 
-fn stm32mp1_uart4_writer(nt: NoType, bytes: []const u8) std.os.WriteError!usize {
+pub fn stm32mp1_uart4_writer(nt: NoType, bytes: []const u8) std.os.WriteError!usize {
     _ = nt;
 
     const stat: *volatile u32 = @ptrFromInt(0x4001001C);

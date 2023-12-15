@@ -1,16 +1,41 @@
 const std = @import("std");
+const Target = @import("std").Target;
+const CrossTarget = std.zig.CrossTarget;
+const Feature = @import("std").Target.Cpu.Feature;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseFast });
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
+
+    const features = Target.arm.Feature;
+    var enabled_features = Feature.Set.empty;
+    enabled_features.addFeature(@intFromEnum(features.v7a)) ;
+    enabled_features.addFeature(@intFromEnum(features.vldn_align)) ;
+    enabled_features.addFeature(@intFromEnum(features.neon)) ;
+    enabled_features.addFeature(@intFromEnum(features.vfp3d16)) ;
+
+    const default_target = CrossTarget{
+        .cpu_arch = .arm,
+        .os_tag = .freestanding,
+        .cpu_model = .{
+            .explicit = &.{
+                .name = "cortex_a7",
+                .llvm_name = "cortex-a7",
+                .features = .{.ints = .{0,0,0,0,0}}, // empty
+            },
+        },
+        .abi = .eabihf,
+        .cpu_features_add = enabled_features
+    };
 
     const exe = b.addExecutable(.{
-        .name = "bare",
+        .name = "kernel",
         .root_source_file = .{ .path = "src/main.zig" },
-        .target = .{ .abi = .eabihf, .cpu_arch = .arm, .os_tag = .freestanding },
+        .target = default_target,
         .optimize = optimize,
     });
-    exe.addAssemblyFile(.{.path = "load.S"});
+
+    exe.addAssemblyFile(.{ .path = "load.S" });
     exe.setLinkerScript(.{ .path = "linker.ld" });
     b.installArtifact(exe);
 
