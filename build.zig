@@ -9,10 +9,10 @@ pub fn build(b: *std.Build) void {
 
     const features = Target.arm.Feature;
     var enabled_features = Feature.Set.empty;
-    enabled_features.addFeature(@intFromEnum(features.v7a)) ;
-    enabled_features.addFeature(@intFromEnum(features.vldn_align)) ;
-    enabled_features.addFeature(@intFromEnum(features.neon)) ;
-    enabled_features.addFeature(@intFromEnum(features.vfp3d16)) ;
+    enabled_features.addFeature(@intFromEnum(features.v7a));
+    enabled_features.addFeature(@intFromEnum(features.vldn_align));
+    enabled_features.addFeature(@intFromEnum(features.neon));
+    enabled_features.addFeature(@intFromEnum(features.vfp3d16));
 
     const default_target = CrossTarget{
         .cpu_arch = .arm,
@@ -21,11 +21,11 @@ pub fn build(b: *std.Build) void {
             .explicit = &.{
                 .name = "cortex_a7",
                 .llvm_name = "cortex-a7",
-                .features = .{.ints = .{0,0,0,0,0}}, // empty
+                .features = .{ .ints = .{ 0, 0, 0, 0, 0 } }, // empty
             },
         },
         .abi = .eabihf,
-        .cpu_features_add = enabled_features
+        .cpu_features_add = enabled_features,
     };
 
     const exe = b.addExecutable(.{
