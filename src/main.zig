@@ -1,8 +1,11 @@
-const root = @import("root.zig");
-const uart = @import("uart.zig");
-const printf = uart.printf;
+const Mem = @import("regmap.zig");
+
+const console = Mem.Bus.APB1._().UART4._().api;
 
 export fn main() u8 {
-    try printf("{s}", .{"Hello, world!\r\n"});
-    return @intCast(root.add(2, 3));
+    // RCC init
+
+    _ = console.write("Hello, world!\r\n");
+
+    return 0;
 }

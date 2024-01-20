@@ -3,21 +3,21 @@ ENTRY(_start)
 
 SECTIONS
 {
-  . = 0xC8000000;
+  . = 0x2FFC0000;
 
-    .text : ALIGN(4K) {
+    .text : ALIGN(4) {
         *(.text)
     }
 
-    .rodata : ALIGN(4K) {
+    .rodata : ALIGN(4) {
         *(.rodata)
     }
 
-    .data : ALIGN(4K) {
+    .data : ALIGN(4) {
         *(.data)
     }
 
-    .bss : ALIGN(4K) {
+    .bss : ALIGN(4) {
         *(COMMON)
         *(.bss)
     }

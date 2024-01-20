@@ -3,7 +3,7 @@
 
 _start:
     // Initialize stack pointer
-    ldr sp, =0xE0000000
+    ldr sp, =0x30000000
 
     // enable C10-C11 coprocessors - VFP&NEON
     ldr r1, =0xF00000
