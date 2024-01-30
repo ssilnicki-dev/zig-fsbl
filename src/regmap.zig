@@ -68,12 +68,23 @@ const Field = struct {
     }
 };
 pub const Bus = enum(reg_type) {
+    APB5 = 0x5C000000,
     APB4 = 0x5A000000,
     AHB4 = 0x50000000,
     APB1 = 0x40000000,
 
     pub fn _(bus: @This()) enum_type {
         return comptime switch (bus) {
+            @This().APB5 => enum(reg_type) {
+                RTC = Port(0x4000, bus),
+                pub fn _(port: @This()) enum_type {
+                    return comptime switch (port) {
+                        @This().RTC => enum(reg_type) {
+                            pub const api = struct {};
+                        },
+                    };
+                }
+            },
             @This().APB1 => enum(reg_type) {
                 UART4 = Port(0x10000, bus),
                 pub fn _(port: @This()) enum_type {
