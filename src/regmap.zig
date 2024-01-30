@@ -110,13 +110,59 @@ pub const Bus = enum(reg_type) {
                 }
             },
             @This().AHB4 => enum(reg_type) {
+                RCC = Port(0x0, bus),
                 PWR = Port(0x1000, bus),
 
                 pub fn _(port: @This()) enum_type {
                     return comptime switch (port) {
+                        @This().RCC => enum(reg_type) {
+                            pub const api = struct {
+                                pub const LSE = struct {
+                                    pub fn init() void { // RM0436 Rev 6, p.531
+                                        const PWR = bus._().PWR._().api;
+                                        const BDCR = port._().BDCR._();
+                                        PWR.disableBackupDomainWriteProtection();
+                                        BDCR.LSEON.set(BDCR.LSEON.values.Off);
+                                        while (BDCR.LSERDY.getEnumValue() == BDCR.LSERDY.values.Ready) {}
+                                        BDCR.LSEBYP.set(BDCR.LSEBYP.values.NotBypassed);
+                                        BDCR.LSEON.set(BDCR.LSEON.values.On);
+                                        while (BDCR.LSERDY.getEnumValue() != BDCR.LSERDY.values.Ready) {}
+                                        PWR.enableBackupDomainWriteProtection();
+                                    }
+                                };
+                            };
+                            BDCR = Reg(0x140, port), // RCC backup domain control register (RCC_BDCR)
+                            pub fn _(reg: @This()) enum_type {
+                                return comptime switch (reg) {
+                                    @This().BDCR => enum {
+                                        pub const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Off = 0,
+                                            On = 1,
+                                        } };
+                                        pub const LSEBYP = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            NotBypassed = 0,
+                                            Bypassed = 1,
+                                        } };
+                                        pub const LSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                    },
+                                };
+                            }
+                        },
                         @This().PWR => enum(reg_type) {
-                            CR1 = Reg(0x0, port),
-
+                            pub const api = struct {
+                                pub fn disableBackupDomainWriteProtection() void {
+                                    const DBP = port._().CR1._().DBP;
+                                    DBP.set(DBP.values.Disabled);
+                                }
+                                pub fn enableBackupDomainWriteProtection() void {
+                                    const DBP = port._().CR1._().DBP;
+                                    DBP.set(DBP.values.Enabled);
+                                }
+                            };
+                            CR1 = Reg(0x0, port), // PWR control register 1 (PWR_CR1)
                             pub fn _(reg: @This()) enum_type {
                                 return comptime switch (reg) {
                                     @This().CR1 => enum {
@@ -126,14 +172,6 @@ pub const Bus = enum(reg_type) {
                                         } };
                                     },
                                 };
-                            }
-                            pub fn disableBackupDomainWriteProtection() void {
-                                const DBP = port._().CR1._().DBP;
-                                DBP.set(DBP.values.Disabled);
-                            }
-                            pub fn enableBackupDomainWriteProtection() void {
-                                const DBP = port._().CR1._().DBP;
-                                DBP.set(DBP.values.Enabled);
                             }
                         },
                     };
