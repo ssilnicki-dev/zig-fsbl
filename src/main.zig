@@ -1,7 +1,7 @@
 const Mem = @import("regmap.zig");
 
-const console = Mem.Bus.APB1._().UART4._().api;
-const RCC = Mem.Bus.AHB4._().RCC._().api;
+const console = Mem.Bus.APB1.ports().UART4.api();
+const RCC = Mem.Bus.AHB4.ports().RCC.api();
 
 export fn main() u8 {
     // RCC init
