@@ -167,55 +167,39 @@ pub const Bus = enum(reg_type) {
                                 DBP.set(DBP.values.Enabled);
                             }
                         },
-                        else => unreachable,
-                    };
-                }
-                fn pin(port: @This(), comptime PIN: u4) enum_type {
-                    const Pin: Field.shift_type = PIN;
-                    return comptime switch (port) {
                         @This().GPIOA, @This().GPIOB, @This().GPIOC, @This().GPIOD, @This().GPIOE, @This().GPIOF, @This().GPIOG, @This().GPIOH, @This().GPIOI, @This().GPIOJ, @This().GPIOK => enum {
-                            const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
-                                Input = 0,
-                                Output = 1,
-                                AltFunc = 2,
-                                Analog = 3,
-                            } };
-                            const OTYPER = Field{ .reg = Reg(0x4, port), .rw = .ReadWrite, .shift = Pin, .width = u1, .values = enum(u1) {
-                                PushPull = 0,
-                                OpenDrain = 1,
-                            } };
-                            const OSPEEDR = Field{ .reg = Reg(0x8, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
-                                Low = 0,
-                                Medium = 1,
-                                High = 2,
-                                VeryHigh = 3,
-                            } };
-                            const PUPDR = Field{ .reg = Reg(0xC, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
-                                Disabled = 0,
-                                PullUp = 1,
-                                PullDown = 2,
-                                Reserved = 3,
-                            } };
-                            const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum(u4) {
-                                AF0 = 0,
-                                AF1 = 1,
-                                AF2 = 2,
-                                AF3 = 3,
-                                AF4 = 4,
-                                AF5 = 5,
-                                AF6 = 6,
-                                AF7 = 7,
-                                AF8 = 8,
-                                AF9 = 9,
-                                AF10 = 10,
-                                AF11 = 11,
-                                AF12 = 12,
-                                AF13 = 13,
-                                AF14 = 14,
-                                AF15 = 15,
-                            } };
+                            pub fn pin(comptime PIN: u4) enum_type {
+                                return comptime enum {
+                                    pub const MODE = enum(u2) { Input = 0, Output = 1, AltFunc = 2, Analog = 3 };
+                                    pub const OTYPE = enum(u1) { PushPull = 0, OpenDrain = 1 };
+                                    pub const OSPEED = enum(u2) { Low = 0, Medium = 1, High = 2, VeryHigh = 3 };
+                                    pub const PUPD = enum(u2) { Disabled = 0, PullUp = 1, PullDown = 2, Reserved = 3 };
+                                    pub fn configure(comptime mode: MODE, comptime otype: OTYPE, comptime ospeed: OSPEED, comptime pupd: PUPD, comptime af: u4) void {
+                                        MODER.set(mode);
+                                        OTYPER.set(otype);
+                                        OSPEEDR.set(ospeed);
+                                        PUPDR.set(pupd);
+                                        if (mode == .AltFunc)
+                                            AFR.set(af);
+                                    }
+                                    pub fn set() void {
+                                        BSR.set(1);
+                                    }
+                                    pub fn reset() void {
+                                        BRR.set(1);
+                                    }
+                                    // private
+                                    const Pin: bus_type = PIN;
+                                    const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = MODE };
+                                    const OTYPER = Field{ .reg = Reg(0x4, port), .rw = .ReadWrite, .shift = Pin, .width = u1, .values = OTYPE };
+                                    const OSPEEDR = Field{ .reg = Reg(0x8, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = OSPEED };
+                                    const PUPDR = Field{ .reg = Reg(0xC, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = PUPD };
+                                    const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum {} };
+                                    const BSR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = Pin, .width = u1, .values = enum {} };
+                                    const BRR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = (Pin + 0x10), .width = u1, .values = enum {} };
+                                };
+                            }
                         },
-                        else => unreachable, // pin() only for GPIO
                     };
                 }
 
