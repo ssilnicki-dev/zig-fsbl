@@ -33,6 +33,10 @@ const Field = struct {
 
     inline fn setValueImpl(comptime self: Field, value: reg_type) void {
         const addr: *volatile reg_type = @ptrFromInt(self.reg);
+        if (self.rw == .WriteOnly) {
+            addr.* = value << self.shift;
+            return;
+        }
         var v = addr.*;
         const mask = self.getMask();
 
