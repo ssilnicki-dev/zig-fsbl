@@ -80,7 +80,7 @@ pub const Bus = enum(reg_type) {
                 pub fn api(port: @This()) enum_type {
                     _ = port;
                 }
-                pub fn regs(port: @This()) enum_type {
+                fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         @This().RTC => enum(reg_type) {},
                     };
@@ -104,21 +104,21 @@ pub const Bus = enum(reg_type) {
                     };
                 }
 
-                pub fn regs(port: @This()) enum_type {
+                fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         @This().UART4 => enum(reg_type) {
                             ISR = Reg(0x1C, port), // USART interrupt and status register (USART_ISR)
                             TDR = Reg(0x28, port), // USART transmit data register (USART_TDR)
-                            pub fn fields(reg: @This()) enum_type {
+                            fn fields(reg: @This()) enum_type {
                                 return comptime switch (reg) {
                                     @This().ISR => enum {
-                                        pub const TXFNF = Field{ .rw = .ReadOnly, .width = u1, .shift = 7, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const TXFNF = Field{ .rw = .ReadOnly, .width = u1, .shift = 7, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             Full = 0,
                                             NotFull = 1,
                                         } };
                                     },
                                     @This().TDR => enum {
-                                        pub const TDR = Field{ .rw = .WriteOnly, .width = u8, .shift = 0, .reg = @intFromEnum(reg), .values = enum {} };
+                                        const TDR = Field{ .rw = .WriteOnly, .width = u8, .shift = 0, .reg = @intFromEnum(reg), .values = enum {} };
                                     },
                                 };
                             }
@@ -170,33 +170,33 @@ pub const Bus = enum(reg_type) {
                         else => unreachable,
                     };
                 }
-                pub fn pin(port: @This(), comptime PIN: u4) enum_type {
+                fn pin(port: @This(), comptime PIN: u4) enum_type {
                     const Pin: Field.shift_type = PIN;
                     return comptime switch (port) {
                         @This().GPIOA, @This().GPIOB, @This().GPIOC, @This().GPIOD, @This().GPIOE, @This().GPIOF, @This().GPIOG, @This().GPIOH, @This().GPIOI, @This().GPIOJ, @This().GPIOK => enum {
-                            pub const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
+                            const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
                                 Input = 0,
                                 Output = 1,
                                 AltFunc = 2,
                                 Analog = 3,
                             } };
-                            pub const OTYPER = Field{ .reg = Reg(0x4, port), .rw = .ReadWrite, .shift = Pin, .width = u1, .values = enum(u1) {
+                            const OTYPER = Field{ .reg = Reg(0x4, port), .rw = .ReadWrite, .shift = Pin, .width = u1, .values = enum(u1) {
                                 PushPull = 0,
                                 OpenDrain = 1,
                             } };
-                            pub const OSPEEDR = Field{ .reg = Reg(0x8, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
+                            const OSPEEDR = Field{ .reg = Reg(0x8, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
                                 Low = 0,
                                 Medium = 1,
                                 High = 2,
                                 VeryHigh = 3,
                             } };
-                            pub const PUPDR = Field{ .reg = Reg(0xC, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
+                            const PUPDR = Field{ .reg = Reg(0xC, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = enum(u2) {
                                 Disabled = 0,
                                 PullUp = 1,
                                 PullDown = 2,
                                 Reserved = 3,
                             } };
-                            pub const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum(u4) {
+                            const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum(u4) {
                                 AF0 = 0,
                                 AF1 = 1,
                                 AF2 = 2,
@@ -219,22 +219,22 @@ pub const Bus = enum(reg_type) {
                     };
                 }
 
-                pub fn regs(port: @This()) enum_type {
+                fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         @This().RCC => enum(reg_type) {
                             BDCR = Reg(0x140, port), // RCC backup domain control register (RCC_BDCR)
-                            pub fn fields(reg: @This()) enum_type {
+                            fn fields(reg: @This()) enum_type {
                                 return comptime switch (reg) {
                                     @This().BDCR => enum {
-                                        pub const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             Off = 0,
                                             On = 1,
                                         } };
-                                        pub const LSEBYP = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const LSEBYP = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             NotBypassed = 0,
                                             Bypassed = 1,
                                         } };
-                                        pub const LSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const LSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             NotReady = 0,
                                             Ready = 1,
                                         } };
@@ -244,10 +244,10 @@ pub const Bus = enum(reg_type) {
                         },
                         @This().PWR => enum(reg_type) {
                             CR1 = Reg(0x0, port), // PWR control register 1 (PWR_CR1)
-                            pub fn fields(reg: @This()) enum_type {
+                            fn fields(reg: @This()) enum_type {
                                 return comptime switch (reg) {
                                     @This().CR1 => enum {
-                                        pub const DBP = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const DBP = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             Enabled = 1,
                                             Disabled = 0,
                                         } };
