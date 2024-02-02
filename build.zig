@@ -45,6 +45,7 @@ pub fn build(b: *std.Build) void {
         .target = standard_target,
         .optimize = optimize,
     });
+    stm32header_elf.linkSystemLibrary("c");
 
     const copy_elf = b.addInstallArtifact(fsbl_elf, .{});
     const bin = b.addObjCopy(fsbl_elf.getEmittedBin(), .{ .format = .bin });
