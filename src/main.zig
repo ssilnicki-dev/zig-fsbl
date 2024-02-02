@@ -7,6 +7,7 @@ const LED = Mem.Bus.AHB4.ports().GPIOA.api().pin(13);
 export fn main() u8 {
     // RCC init
     RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
+    RCC.HSE.init(RCC.EXT_CLOCK_MODE.Crystal);
 
     // LED
     LED.configure(LED.MODE.Output, LED.OTYPE.OpenDrain, LED.OSPEED.High, LED.PUPD.Disabled, 0);

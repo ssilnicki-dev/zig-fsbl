@@ -161,7 +161,21 @@ pub const Bus = enum(bus_type) {
                                     PWR.enableBackupDomainWriteProtection();
                                 }
                             };
+                            pub const HSE = struct {
+                                pub fn init(comptime mode: EXT_CLOCK_MODE) void { // EM0436 Rev 6, p.526
+                                    _ = mode;
+                                    const OCENCLRR = port.regs().OCENCLRR.fields();
+                                    const HSEON = port.regs().OCENSETR.fields().HSEON;
+                                    const HSERDY = port.regs().OCRDYR.fields().HSERDY;
+                                    OCENCLRR.HSEON.set(OCENCLRR.HSEON.values.Clear);
+                                    while (HSERDY.getEnumValue() == HSERDY.values.Ready) {}
+                                    OCENCLRR.HSEBYP.set(OCENCLRR.HSEBYP.values.Clear);
+                                    HSEON.set(HSEON.values.Set);
+                                    while (HSERDY.getEnumValue() != HSERDY.values.Ready) {}
+                                }
+                            };
                         },
+
                         @This().PWR => enum(bus_type) {
                             const DBP = port.regs().CR1.fields().DBP;
                             pub fn disableBackupDomainWriteProtection() void {
@@ -210,9 +224,26 @@ pub const Bus = enum(bus_type) {
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         @This().RCC => enum(bus_type) {
+                            OCENSETR = Reg(0x0C, port), // RCC oscillator clock enable set register (RCC_OCENSETR)
+                            OCENCLRR = Reg(0x10, port), // RCC oscillator clock enable clear register (RCC_OCENCLRR)
                             BDCR = Reg(0x140, port), // RCC backup domain control register (RCC_BDCR)
+                            OCRDYR = Reg(0x808, port), // RCC oscillator clock ready register (RCC_OCRDYR)
                             fn fields(reg: @This()) enum_type {
                                 return comptime switch (reg) {
+                                    @This().OCENSETR => enum {
+                                        const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                    },
+                                    @This().OCENCLRR => enum {
+                                        const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                        const HSEBYP = Field{ .rw = .WriteOnly, .width = u1, .shift = 10, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                    },
+
                                     @This().BDCR => enum {
                                         const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             Off = 0,
@@ -223,6 +254,12 @@ pub const Bus = enum(bus_type) {
                                             Bypassed = 1,
                                         } };
                                         const LSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                    },
+                                    @This().OCRDYR => enum {
+                                        const HSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             NotReady = 0,
                                             Ready = 1,
                                         } };
