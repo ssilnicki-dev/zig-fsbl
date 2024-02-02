@@ -12,7 +12,7 @@ export fn main() u8 {
     LED.configure(LED.MODE.Output, LED.OTYPE.OpenDrain, LED.OSPEED.High, LED.PUPD.Disabled, 0);
     LED.reset();
 
-    _ = console.write("Hello, world!\r\n");
+    // _ = console.write("Hello, world!\r\n");
 
     return 0;
 }
