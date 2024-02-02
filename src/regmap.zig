@@ -146,8 +146,10 @@ pub const Bus = enum(bus_type) {
                 pub fn api(port: @This()) enum_type {
                     return comptime switch (port) {
                         @This().RCC => enum(bus_type) {
+                            pub const EXT_CLOCK_MODE = enum { Crystal };
                             pub const LSE = struct {
-                                pub fn init() void { // RM0436 Rev 6, p.531
+                                pub fn init(comptime mode: EXT_CLOCK_MODE) void { // RM0436 Rev 6, p.531
+                                    _ = mode;
                                     const PWR = bus.ports().PWR.api();
                                     const BDCR = port.regs().BDCR.fields();
                                     PWR.disableBackupDomainWriteProtection();
