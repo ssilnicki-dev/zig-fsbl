@@ -165,10 +165,10 @@ pub const Bus = enum(bus_type) {
                         @This().PWR => enum(bus_type) {
                             const DBP = port.regs().CR1.fields().DBP;
                             pub fn disableBackupDomainWriteProtection() void {
-                                DBP.set(DBP.values.Disabled);
+                                DBP.set(DBP.values.Enabled);
                             }
                             pub fn enableBackupDomainWriteProtection() void {
-                                DBP.set(DBP.values.Enabled);
+                                DBP.set(DBP.values.Disabled);
                             }
                         },
                         @This().GPIOA, @This().GPIOB, @This().GPIOC, @This().GPIOD, @This().GPIOE, @This().GPIOF, @This().GPIOG, @This().GPIOH, @This().GPIOI, @This().GPIOJ, @This().GPIOK => enum {
