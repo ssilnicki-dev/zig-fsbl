@@ -70,6 +70,115 @@ const Field = struct {
         return @as(self.values, @enumFromInt(self.getIntValue()));
     }
 };
+
+fn API(comptime port: anytype) enum_type {
+    const gpioa = @intFromEnum(Bus.AHB4.ports().GPIOA);
+    const gpiob = @intFromEnum(Bus.AHB4.ports().GPIOB);
+    const gpioc = @intFromEnum(Bus.AHB4.ports().GPIOC);
+    const gpiod = @intFromEnum(Bus.AHB4.ports().GPIOD);
+    const gpioe = @intFromEnum(Bus.AHB4.ports().GPIOE);
+    const gpiof = @intFromEnum(Bus.AHB4.ports().GPIOF);
+    const gpiog = @intFromEnum(Bus.AHB4.ports().GPIOG);
+    const gpioh = @intFromEnum(Bus.AHB4.ports().GPIOH);
+    const gpioi = @intFromEnum(Bus.AHB4.ports().GPIOI);
+    const gpioj = @intFromEnum(Bus.AHB4.ports().GPIOJ);
+    const gpiok = @intFromEnum(Bus.AHB4.ports().GPIOK);
+    const gpioz = @intFromEnum(Bus.AHB5.ports().GPIOZ);
+    const rcc = @intFromEnum(Bus.AHB4.ports().RCC);
+    const pwr = @intFromEnum(Bus.AHB4.ports().PWR);
+    const uart4 = @intFromEnum(Bus.APB1.ports().UART4);
+
+    return comptime switch (@intFromEnum(port)) {
+        rcc => enum(bus_type) {
+            pub const EXT_CLOCK_MODE = enum { Crystal };
+            pub const LSE = struct {
+                pub fn init(comptime mode: EXT_CLOCK_MODE) void { // RM0436 Rev 6, p.531
+                    _ = mode;
+                    const PWR = API(Bus.AHB4.ports().PWR);
+                    const BDCR = port.regs().BDCR.fields();
+                    PWR.disableBackupDomainWriteProtection();
+                    BDCR.LSEON.set(BDCR.LSEON.values.Off);
+                    while (BDCR.LSERDY.getEnumValue() == BDCR.LSERDY.values.Ready) {}
+                    BDCR.LSEBYP.set(BDCR.LSEBYP.values.NotBypassed);
+                    BDCR.LSEON.set(BDCR.LSEON.values.On);
+                    while (BDCR.LSERDY.getEnumValue() != BDCR.LSERDY.values.Ready) {}
+                    PWR.enableBackupDomainWriteProtection();
+                }
+            };
+            pub const HSE = struct {
+                pub fn init(comptime mode: EXT_CLOCK_MODE) void { // EM0436 Rev 6, p.526
+                    _ = mode;
+                    const OCENCLRR = port.regs().OCENCLRR.fields();
+                    const HSEON = port.regs().OCENSETR.fields().HSEON;
+                    const HSERDY = port.regs().OCRDYR.fields().HSERDY;
+                    OCENCLRR.HSEON.set(OCENCLRR.HSEON.values.Clear);
+                    while (HSERDY.getEnumValue() == HSERDY.values.Ready) {}
+                    OCENCLRR.HSEBYP.set(OCENCLRR.HSEBYP.values.Clear);
+                    HSEON.set(HSEON.values.Set);
+                    while (HSERDY.getEnumValue() != HSERDY.values.Ready) {}
+                }
+            };
+        },
+
+        pwr => enum(bus_type) {
+            const DBP = port.regs().CR1.fields().DBP;
+            pub fn disableBackupDomainWriteProtection() void {
+                DBP.set(DBP.values.Enabled);
+            }
+            pub fn enableBackupDomainWriteProtection() void {
+                DBP.set(DBP.values.Disabled);
+            }
+        },
+
+        gpioa, gpiob, gpioc, gpiod, gpioe, gpiof, gpiog, gpioh, gpioi, gpioj, gpiok, gpioz => enum(bus_type) {
+            pub fn pin(comptime PIN: u4) enum_type {
+                return comptime enum {
+                    pub const MODE = enum(u2) { Input = 0, Output = 1, AltFunc = 2, Analog = 3 };
+                    pub const OTYPE = enum(u1) { PushPull = 0, OpenDrain = 1 };
+                    pub const OSPEED = enum(u2) { Low = 0, Medium = 1, High = 2, VeryHigh = 3 };
+                    pub const PUPD = enum(u2) { Disabled = 0, PullUp = 1, PullDown = 2, Reserved = 3 };
+                    pub fn configure(comptime mode: MODE, comptime otype: OTYPE, comptime ospeed: OSPEED, comptime pupd: PUPD, comptime af: u4) void {
+                        MODER.set(mode);
+                        OTYPER.set(otype);
+                        OSPEEDR.set(ospeed);
+                        PUPDR.set(pupd);
+                        if (mode == .AltFunc)
+                            AFR.set(af);
+                    }
+                    pub fn set() void {
+                        BSR.set(1);
+                    }
+                    pub fn reset() void {
+                        BRR.set(1);
+                    }
+                    // private
+                    const Pin: bus_type = PIN;
+                    const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = MODE };
+                    const OTYPER = Field{ .reg = Reg(0x4, port), .rw = .ReadWrite, .shift = Pin, .width = u1, .values = OTYPE };
+                    const OSPEEDR = Field{ .reg = Reg(0x8, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = OSPEED };
+                    const PUPDR = Field{ .reg = Reg(0xC, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = PUPD };
+                    const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum {} };
+                    const BSR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = Pin, .width = u1, .values = enum {} };
+                    const BRR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = (Pin + 0x10), .width = u1, .values = enum {} };
+                };
+            }
+        },
+
+        uart4 => enum(bus_type) {
+            pub fn write(bytes: []const u8) usize {
+                const TXFNF = port.regs().ISR.fields().TXFNF;
+                const TDR = port.regs().TDR.fields().TDR;
+                for (bytes) |byte| {
+                    while (TXFNF.getEnumValue() == TXFNF.values.Full) {}
+                    TDR.set(byte);
+                }
+                return bytes.len;
+            }
+        },
+        else => unreachable,
+    };
+}
+
 pub const Bus = enum(bus_type) {
     APB5 = 0x5C000000,
     AHB4 = 0x50000000,
@@ -78,10 +187,11 @@ pub const Bus = enum(bus_type) {
     pub fn ports(bus: @This()) enum_type {
         return comptime switch (bus) {
             .APB5 => enum(bus_type) {
-                RTC = Port(0x4000, bus),
                 pub fn api(port: @This()) enum_type {
-                    _ = port;
+                    return API(port);
                 }
+
+                RTC = Port(0x4000, bus),
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         .RTC => enum(bus_type) {},
@@ -89,23 +199,11 @@ pub const Bus = enum(bus_type) {
                 }
             },
             .APB1 => enum(bus_type) {
-                UART4 = Port(0x10000, bus),
                 pub fn api(port: @This()) enum_type {
-                    return comptime switch (port) {
-                        .UART4 => enum(bus_type) {
-                            pub fn write(bytes: []const u8) usize {
-                                const TXFNF = port.regs().ISR.fields().TXFNF;
-                                const TDR = port.regs().TDR.fields().TDR;
-                                for (bytes) |byte| {
-                                    while (TXFNF.getEnumValue() == TXFNF.values.Full) {}
-                                    TDR.set(byte);
-                                }
-                                return bytes.len;
-                            }
-                        },
-                    };
+                    return API(port);
                 }
 
+                UART4 = Port(0x10000, bus),
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         .UART4 => enum(bus_type) {
@@ -129,6 +227,10 @@ pub const Bus = enum(bus_type) {
                 }
             },
             .AHB4 => enum(bus_type) {
+                pub fn api(port: @This()) enum_type {
+                    return API(port);
+                }
+
                 RCC = Port(0x0, bus),
                 PWR = Port(0x1000, bus),
                 GPIOA = Port(0x2000, bus),
@@ -142,84 +244,6 @@ pub const Bus = enum(bus_type) {
                 GPIOI = Port(0xA000, bus),
                 GPIOJ = Port(0xB000, bus),
                 GPIOK = Port(0xC000, bus),
-
-                pub fn api(port: @This()) enum_type {
-                    return comptime switch (port) {
-                        .RCC => enum(bus_type) {
-                            pub const EXT_CLOCK_MODE = enum { Crystal };
-                            pub const LSE = struct {
-                                pub fn init(comptime mode: EXT_CLOCK_MODE) void { // RM0436 Rev 6, p.531
-                                    _ = mode;
-                                    const PWR = bus.ports().PWR.api();
-                                    const BDCR = port.regs().BDCR.fields();
-                                    PWR.disableBackupDomainWriteProtection();
-                                    BDCR.LSEON.set(BDCR.LSEON.values.Off);
-                                    while (BDCR.LSERDY.getEnumValue() == BDCR.LSERDY.values.Ready) {}
-                                    BDCR.LSEBYP.set(BDCR.LSEBYP.values.NotBypassed);
-                                    BDCR.LSEON.set(BDCR.LSEON.values.On);
-                                    while (BDCR.LSERDY.getEnumValue() != BDCR.LSERDY.values.Ready) {}
-                                    PWR.enableBackupDomainWriteProtection();
-                                }
-                            };
-                            pub const HSE = struct {
-                                pub fn init(comptime mode: EXT_CLOCK_MODE) void { // EM0436 Rev 6, p.526
-                                    _ = mode;
-                                    const OCENCLRR = port.regs().OCENCLRR.fields();
-                                    const HSEON = port.regs().OCENSETR.fields().HSEON;
-                                    const HSERDY = port.regs().OCRDYR.fields().HSERDY;
-                                    OCENCLRR.HSEON.set(OCENCLRR.HSEON.values.Clear);
-                                    while (HSERDY.getEnumValue() == HSERDY.values.Ready) {}
-                                    OCENCLRR.HSEBYP.set(OCENCLRR.HSEBYP.values.Clear);
-                                    HSEON.set(HSEON.values.Set);
-                                    while (HSERDY.getEnumValue() != HSERDY.values.Ready) {}
-                                }
-                            };
-                        },
-
-                        .PWR => enum(bus_type) {
-                            const DBP = port.regs().CR1.fields().DBP;
-                            pub fn disableBackupDomainWriteProtection() void {
-                                DBP.set(DBP.values.Enabled);
-                            }
-                            pub fn enableBackupDomainWriteProtection() void {
-                                DBP.set(DBP.values.Disabled);
-                            }
-                        },
-                        .GPIOA, .GPIOB, .GPIOC, .GPIOD, .GPIOE, .GPIOF, .GPIOG, .GPIOH, .GPIOI, .GPIOJ, .GPIOK => enum {
-                            pub fn pin(comptime PIN: u4) enum_type {
-                                return comptime enum {
-                                    pub const MODE = enum(u2) { Input = 0, Output = 1, AltFunc = 2, Analog = 3 };
-                                    pub const OTYPE = enum(u1) { PushPull = 0, OpenDrain = 1 };
-                                    pub const OSPEED = enum(u2) { Low = 0, Medium = 1, High = 2, VeryHigh = 3 };
-                                    pub const PUPD = enum(u2) { Disabled = 0, PullUp = 1, PullDown = 2, Reserved = 3 };
-                                    pub fn configure(comptime mode: MODE, comptime otype: OTYPE, comptime ospeed: OSPEED, comptime pupd: PUPD, comptime af: u4) void {
-                                        MODER.set(mode);
-                                        OTYPER.set(otype);
-                                        OSPEEDR.set(ospeed);
-                                        PUPDR.set(pupd);
-                                        if (mode == .AltFunc)
-                                            AFR.set(af);
-                                    }
-                                    pub fn set() void {
-                                        BSR.set(1);
-                                    }
-                                    pub fn reset() void {
-                                        BRR.set(1);
-                                    }
-                                    // private
-                                    const Pin: bus_type = PIN;
-                                    const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = MODE };
-                                    const OTYPER = Field{ .reg = Reg(0x4, port), .rw = .ReadWrite, .shift = Pin, .width = u1, .values = OTYPE };
-                                    const OSPEEDR = Field{ .reg = Reg(0x8, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = OSPEED };
-                                    const PUPDR = Field{ .reg = Reg(0xC, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = PUPD };
-                                    const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum {} };
-                                    const BSR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = Pin, .width = u1, .values = enum {} };
-                                    const BRR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = (Pin + 0x10), .width = u1, .values = enum {} };
-                                };
-                            }
-                        },
-                    };
-                }
 
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
