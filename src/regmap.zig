@@ -2,6 +2,8 @@
 const bus_type: type = u32;
 const enum_type: type = @TypeOf(enum {});
 
+const HSI_FRIQUENCY = 64000000;
+
 const Field = struct {
     pub const shift_type = switch (bus_type) {
         u32 => u5,
@@ -79,7 +81,9 @@ fn API(comptime port: anytype) enum_type {
     const pwr = @intFromEnum(Bus.AHB4.ports().PWR);
     const uart4 = @intFromEnum(Bus.APB1.ports().UART4);
 
-    return comptime switch (@intFromEnum(port)) {
+    const current_port = @intFromEnum(port);
+
+    return comptime switch (current_port) {
         rcc => enum(bus_type) {
             pub const EXT_CLOCK_MODE = enum { Crystal };
             pub const LSE = struct {
@@ -151,11 +155,89 @@ fn API(comptime port: anytype) enum_type {
                     const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum {} };
                     const BSR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = Pin, .width = u1, .values = enum {} };
                     const BRR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = (Pin + 0x10), .width = u1, .values = enum {} };
+
+                    pub fn enableGPIOclocks() void {
+                        port.api().CLOCKS.enable();
+                    }
+
+                    pub fn disableGPIOclocks() void {
+                        port.api().CLOCKS.disable();
+                    }
                 };
             }
+            pub const CLOCKS = struct {
+                // TODO: manage MCU as weel as MPU
+                pub fn enable() void {
+                    const en_reg = Bus.AHB4.ports().RCC.regs().MP_AHB4ENSETR.fields();
+                    const en = comptime switch (current_port) {
+                        gpiob => en_reg.GPIOBEN,
+                        gpiog => en_reg.GPIOGEN,
+                        else => unreachable,
+                    };
+                    en.set(en.values.Set);
+                }
+                pub fn disable() void {
+                    const dis_reg = Bus.AHB4.ports().RCC.regs().MP_AHB4ENCLRR.fields();
+                    const dis = comptime switch (current_port) {
+                        gpiob => dis_reg.GPIOBEN,
+                        gpiog => dis_reg.GPIOGEN,
+                        else => unreachable,
+                    };
+                    dis.set(dis.values.Set);
+                }
+            };
         },
 
         uart4 => enum(bus_type) {
+            pub fn init() void {
+                // TODO: parametrise as per baud rate, parity, bits, stop bits, clock source, etc.
+                // currently configuring as HSI, 115200, 8N1, FIFO
+                const HSIKERON = Bus.AHB4.ports().RCC.regs().OCENSETR.fields().HSIKERON;
+                const HSIDIVRDY = Bus.AHB4.ports().RCC.regs().OCRDYR.fields().HSIDIVRDY;
+                const HSIDIV = Bus.AHB4.ports().RCC.regs().HSICFGR.fields().HSIDIV;
+                const UARTSRC = switch (port) {
+                    .UART4 => Bus.AHB4.ports().RCC.regs().UART24CKSELR.fields().UART24SRC,
+                };
+                const UARTEN = switch (port) {
+                    .UART4 => Bus.AHB4.ports().RCC.regs().MP_APB1ENSETR.fields().UART4EN,
+                };
+
+                const CR1 = port.regs().CR1.fields();
+                const CR2 = port.regs().CR2.fields();
+                const PRESCALER = port.regs().PRESC.fields().PRESCALER;
+                const BRR = port.regs().BRR;
+
+                HSIKERON.set(HSIKERON.values.Set); // keep HSI running in LP mode
+                UARTSRC.set(UARTSRC.values.HSI); // clock source for UART
+                UARTEN.set(UARTEN.values.Set); // enable clock delivery to periph.
+
+                CR1.UE.set(CR1.UE.values.DisabledLPmode);
+                CR1.M0.set(CR1.M0.values.DataBits7or8);
+                CR1.M1.set(CR1.M1.values.DataBits8or9);
+                CR1.OVER8.set(CR1.OVER8.values.Oversampling8);
+                CR1.PCE.set(CR1.PCE.values.Disabled);
+                CR1.TE.set(CR1.TE.values.Enabled);
+                CR1.RE.set(CR1.RE.values.Enabled);
+                CR1.FIFOEN.set(CR1.FIFOEN.values.Enabled);
+                CR2.STOP.set(CR2.STOP.values.One);
+                while (HSIDIVRDY.getEnumValue() != HSIDIVRDY.values.Ready) {}
+
+                const baudrate: u32 = 115200;
+                const hsi_clock_fq: u32 = switch (HSIDIV.getEnumValue()) {
+                    HSIDIV.values.One => HSI_FRIQUENCY,
+                    HSIDIV.values.Two => HSI_FRIQUENCY / 2,
+                    HSIDIV.values.Four => HSI_FRIQUENCY / 4,
+                    HSIDIV.values.Eight => HSI_FRIQUENCY / 8,
+                };
+                const prescaler: u32 = 16;
+                const brr: u32 = ((2 * hsi_clock_fq / prescaler) + (baudrate / 2)) / baudrate;
+                BRR.fields().BRR3_0.set((brr & 0xF) >> 1);
+                BRR.fields().BRR15_4.set((brr & 0xFFF0) >> 4);
+                PRESCALER.set(PRESCALER.values.Div16);
+
+                CR1.UE.set(CR1.UE.values.Enabled);
+            }
+
             pub fn write(bytes: []const u8) usize {
                 const TXFNF = port.regs().ISR.fields().TXFNF;
                 const TDR = port.regs().TDR.fields().TDR;
@@ -198,10 +280,76 @@ pub const Bus = enum(bus_type) {
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         .UART4 => enum(bus_type) {
+                            CR1 = Reg(0x0, port), // USART control register 1 (USART_CR1)
+                            CR2 = Reg(0x4, port), // USART control register 2 (USART_CR2)
+                            BRR = Reg(0xC, port), // USART baud rate register (USART_BRR)
                             ISR = Reg(0x1C, port), // USART interrupt and status register (USART_ISR)
                             TDR = Reg(0x28, port), // USART transmit data register (USART_TDR)
+                            PRESC = Reg(0x2C, port), // USART prescaler register (USART_PRESC)
                             fn fields(reg: @This()) enum_type {
                                 return comptime switch (reg) {
+                                    .BRR => enum {
+                                        const BRR3_0 = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = @intFromEnum(reg), .values = enum {} };
+                                        const BRR15_4 = Field{ .rw = .ReadWrite, .width = u12, .shift = 4, .reg = @intFromEnum(reg), .values = enum {} };
+                                    },
+                                    .PRESC => enum {
+                                        const PRESCALER = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u4) {
+                                            NoDiv = 0,
+                                            Div2 = 1,
+                                            Div4 = 2,
+                                            Div6 = 3,
+                                            Div8 = 4,
+                                            Div10 = 5,
+                                            Div12 = 6,
+                                            Div16 = 7,
+                                            Div32 = 8,
+                                            Div64 = 9,
+                                            Div128 = 10,
+                                            Div256 = 11,
+                                        } };
+                                    },
+                                    .CR2 => enum {
+                                        const STOP = Field{ .rw = .ReadWrite, .width = u2, .shift = 12, .reg = @intFromEnum(reg), .values = enum(u2) {
+                                            One = 0,
+                                            Half = 1,
+                                            Two = 2,
+                                            OneHalf = 3,
+                                        } };
+                                    },
+                                    .CR1 => enum {
+                                        const UE = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            DisabledLPmode = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const RE = Field{ .rw = .ReadWrite, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const TE = Field{ .rw = .ReadWrite, .width = u1, .shift = 3, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const PCE = Field{ .rw = .ReadWrite, .width = u1, .shift = 10, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const M0 = Field{ .rw = .ReadWrite, .width = u1, .shift = 12, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            DataBits7or8 = 0,
+                                            DataBits9 = 1,
+                                        } };
+                                        const M1 = Field{ .rw = .ReadWrite, .width = u1, .shift = 28, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            DataBits8or9 = 0,
+                                            DataBits7 = 1,
+                                        } };
+                                        const OVER8 = Field{ .rw = .ReadWrite, .width = u1, .shift = 15, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Oversampling16 = 0,
+                                            Oversampling8 = 1,
+                                        } };
+                                        const FIFOEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 29, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
                                     .ISR => enum {
                                         const TXFNF = Field{ .rw = .ReadOnly, .width = u1, .shift = 7, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             Full = 0,
@@ -233,12 +381,64 @@ pub const Bus = enum(bus_type) {
                         .RCC => enum(bus_type) {
                             OCENSETR = Reg(0x0C, port), // RCC oscillator clock enable set register (RCC_OCENSETR)
                             OCENCLRR = Reg(0x10, port), // RCC oscillator clock enable clear register (RCC_OCENCLRR)
+                            HSICFGR = Reg(0x18, port), // RCC HSI configuration register (RCC_HSICFGR)
                             BDCR = Reg(0x140, port), // RCC backup domain control register (RCC_BDCR)
                             OCRDYR = Reg(0x808, port), // RCC oscillator clock ready register (RCC_OCRDYR)
+                            UART24CKSELR = Reg(0x8E8, port), // RCC UART2,4 kernel clock selection register (RCC_UART24CKSELR)
+                            MP_APB1ENSETR = Reg(0xA00, port), // RCC APB1 peripheral enable for MPU set register (RCC_MP_APB1ENSETR)
+                            MP_AHB4ENSETR = Reg(0xA28, port), // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
+                            MP_AHB4ENCLRR = Reg(0xA2C, port), // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
                             fn fields(reg: @This()) enum_type {
                                 return comptime switch (reg) {
+                                    .HSICFGR => enum {
+                                        const HSIDIV = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u2) {
+                                            One = 0,
+                                            Two = 1,
+                                            Four = 2,
+                                            Eight = 3,
+                                        } };
+                                    },
+                                    .UART24CKSELR => enum {
+                                        const UART24SRC = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u3) {
+                                            PCLK1 = 0,
+                                            PLL4Q = 1,
+                                            HSI = 2,
+                                            CSI = 3,
+                                            HSE = 4,
+                                        } };
+                                    },
+                                    .MP_AHB4ENCLRR => enum {
+                                        const GPIOAEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                    },
+                                    .MP_AHB4ENSETR => enum {
+                                        const GPIOAEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                    },
+                                    .MP_APB1ENSETR => enum {
+                                        const UART4EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                    },
                                     .OCENSETR => enum {
                                         const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const HSIKERON = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             Set = 1,
                                         } };
                                     },
@@ -267,6 +467,10 @@ pub const Bus = enum(bus_type) {
                                     },
                                     .OCRDYR => enum {
                                         const HSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const HSIDIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
                                             NotReady = 0,
                                             Ready = 1,
                                         } };
