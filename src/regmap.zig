@@ -74,16 +74,7 @@ const Field = struct {
 fn API(comptime port: anytype) enum_type {
     const gpioa = @intFromEnum(Bus.AHB4.ports().GPIOA);
     const gpiob = @intFromEnum(Bus.AHB4.ports().GPIOB);
-    const gpioc = @intFromEnum(Bus.AHB4.ports().GPIOC);
-    const gpiod = @intFromEnum(Bus.AHB4.ports().GPIOD);
-    const gpioe = @intFromEnum(Bus.AHB4.ports().GPIOE);
-    const gpiof = @intFromEnum(Bus.AHB4.ports().GPIOF);
     const gpiog = @intFromEnum(Bus.AHB4.ports().GPIOG);
-    const gpioh = @intFromEnum(Bus.AHB4.ports().GPIOH);
-    const gpioi = @intFromEnum(Bus.AHB4.ports().GPIOI);
-    const gpioj = @intFromEnum(Bus.AHB4.ports().GPIOJ);
-    const gpiok = @intFromEnum(Bus.AHB4.ports().GPIOK);
-    const gpioz = @intFromEnum(Bus.AHB5.ports().GPIOZ);
     const rcc = @intFromEnum(Bus.AHB4.ports().RCC);
     const pwr = @intFromEnum(Bus.AHB4.ports().PWR);
     const uart4 = @intFromEnum(Bus.APB1.ports().UART4);
@@ -130,7 +121,7 @@ fn API(comptime port: anytype) enum_type {
             }
         },
 
-        gpioa, gpiob, gpioc, gpiod, gpioe, gpiof, gpiog, gpioh, gpioi, gpioj, gpiok, gpioz => enum(bus_type) {
+        gpioa, gpiob, gpiog => enum(bus_type) {
             pub fn pin(comptime PIN: u4) enum_type {
                 return comptime enum {
                     pub const MODE = enum(u2) { Input = 0, Output = 1, AltFunc = 2, Analog = 3 };
@@ -235,15 +226,7 @@ pub const Bus = enum(bus_type) {
                 PWR = Port(0x1000, bus),
                 GPIOA = Port(0x2000, bus),
                 GPIOB = Port(0x3000, bus),
-                GPIOC = Port(0x4000, bus),
-                GPIOD = Port(0x5000, bus),
-                GPIOE = Port(0x6000, bus),
-                GPIOF = Port(0x7000, bus),
                 GPIOG = Port(0x8000, bus),
-                GPIOH = Port(0x9000, bus),
-                GPIOI = Port(0xA000, bus),
-                GPIOJ = Port(0xB000, bus),
-                GPIOK = Port(0xC000, bus),
 
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
