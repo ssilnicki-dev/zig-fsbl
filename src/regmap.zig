@@ -287,13 +287,14 @@ pub const Bus = enum(bus_type) {
                             TDR = Reg(0x28, port), // USART transmit data register (USART_TDR)
                             PRESC = Reg(0x2C, port), // USART prescaler register (USART_PRESC)
                             fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
                                     .BRR => enum {
-                                        const BRR3_0 = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = @intFromEnum(reg), .values = enum {} };
-                                        const BRR15_4 = Field{ .rw = .ReadWrite, .width = u12, .shift = 4, .reg = @intFromEnum(reg), .values = enum {} };
+                                        const BRR3_0 = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = addr, .values = enum {} };
+                                        const BRR15_4 = Field{ .rw = .ReadWrite, .width = u12, .shift = 4, .reg = addr, .values = enum {} };
                                     },
                                     .PRESC => enum {
-                                        const PRESCALER = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u4) {
+                                        const PRESCALER = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = addr, .values = enum(u4) {
                                             NoDiv = 0,
                                             Div2 = 1,
                                             Div4 = 2,
@@ -309,7 +310,7 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .CR2 => enum {
-                                        const STOP = Field{ .rw = .ReadWrite, .width = u2, .shift = 12, .reg = @intFromEnum(reg), .values = enum(u2) {
+                                        const STOP = Field{ .rw = .ReadWrite, .width = u2, .shift = 12, .reg = addr, .values = enum(u2) {
                                             One = 0,
                                             Half = 1,
                                             Two = 2,
@@ -317,47 +318,47 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .CR1 => enum {
-                                        const UE = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const UE = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
                                             DisabledLPmode = 0,
                                             Enabled = 1,
                                         } };
-                                        const RE = Field{ .rw = .ReadWrite, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const RE = Field{ .rw = .ReadWrite, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
                                             Disabled = 0,
                                             Enabled = 1,
                                         } };
-                                        const TE = Field{ .rw = .ReadWrite, .width = u1, .shift = 3, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const TE = Field{ .rw = .ReadWrite, .width = u1, .shift = 3, .reg = addr, .values = enum(u1) {
                                             Disabled = 0,
                                             Enabled = 1,
                                         } };
-                                        const PCE = Field{ .rw = .ReadWrite, .width = u1, .shift = 10, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const PCE = Field{ .rw = .ReadWrite, .width = u1, .shift = 10, .reg = addr, .values = enum(u1) {
                                             Disabled = 0,
                                             Enabled = 1,
                                         } };
-                                        const M0 = Field{ .rw = .ReadWrite, .width = u1, .shift = 12, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const M0 = Field{ .rw = .ReadWrite, .width = u1, .shift = 12, .reg = addr, .values = enum(u1) {
                                             DataBits7or8 = 0,
                                             DataBits9 = 1,
                                         } };
-                                        const M1 = Field{ .rw = .ReadWrite, .width = u1, .shift = 28, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const M1 = Field{ .rw = .ReadWrite, .width = u1, .shift = 28, .reg = addr, .values = enum(u1) {
                                             DataBits8or9 = 0,
                                             DataBits7 = 1,
                                         } };
-                                        const OVER8 = Field{ .rw = .ReadWrite, .width = u1, .shift = 15, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const OVER8 = Field{ .rw = .ReadWrite, .width = u1, .shift = 15, .reg = addr, .values = enum(u1) {
                                             Oversampling16 = 0,
                                             Oversampling8 = 1,
                                         } };
-                                        const FIFOEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 29, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const FIFOEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 29, .reg = addr, .values = enum(u1) {
                                             Disabled = 0,
                                             Enabled = 1,
                                         } };
                                     },
                                     .ISR => enum {
-                                        const TXFNF = Field{ .rw = .ReadOnly, .width = u1, .shift = 7, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const TXFNF = Field{ .rw = .ReadOnly, .width = u1, .shift = 7, .reg = addr, .values = enum(u1) {
                                             Full = 0,
                                             NotFull = 1,
                                         } };
                                     },
                                     .TDR => enum {
-                                        const TDR = Field{ .rw = .WriteOnly, .width = u8, .shift = 0, .reg = @intFromEnum(reg), .values = enum {} };
+                                        const TDR = Field{ .rw = .WriteOnly, .width = u8, .shift = 0, .reg = addr, .values = enum {} };
                                     },
                                 };
                             }
@@ -389,9 +390,10 @@ pub const Bus = enum(bus_type) {
                             MP_AHB4ENSETR = Reg(0xA28, port), // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
                             MP_AHB4ENCLRR = Reg(0xA2C, port), // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
                             fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
                                     .HSICFGR => enum {
-                                        const HSIDIV = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u2) {
+                                        const HSIDIV = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = enum(u2) {
                                             One = 0,
                                             Two = 1,
                                             Four = 2,
@@ -399,7 +401,7 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .UART24CKSELR => enum {
-                                        const UART24SRC = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u3) {
+                                        const UART24SRC = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = addr, .values = enum(u3) {
                                             PCLK1 = 0,
                                             PLL4Q = 1,
                                             HSI = 2,
@@ -408,69 +410,69 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .MP_AHB4ENCLRR => enum {
-                                        const GPIOAEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const GPIOAEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
-                                        const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
-                                        const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
                                     },
                                     .MP_AHB4ENSETR => enum {
-                                        const GPIOAEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const GPIOAEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
-                                        const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
-                                        const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
                                     },
                                     .MP_APB1ENSETR => enum {
-                                        const UART4EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const UART4EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
                                     },
                                     .OCENSETR => enum {
-                                        const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
-                                        const HSIKERON = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const HSIKERON = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
                                     },
                                     .OCENCLRR => enum {
-                                        const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             Clear = 1,
                                         } };
-                                        const HSEBYP = Field{ .rw = .WriteOnly, .width = u1, .shift = 10, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const HSEBYP = Field{ .rw = .WriteOnly, .width = u1, .shift = 10, .reg = addr, .values = enum(u1) {
                                             Clear = 1,
                                         } };
                                     },
 
                                     .BDCR => enum {
-                                        const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
                                             Off = 0,
                                             On = 1,
                                         } };
-                                        const LSEBYP = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const LSEBYP = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
                                             NotBypassed = 0,
                                             Bypassed = 1,
                                         } };
-                                        const LSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const LSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
                                             NotReady = 0,
                                             Ready = 1,
                                         } };
                                     },
                                     .OCRDYR => enum {
-                                        const HSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const HSERDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             NotReady = 0,
                                             Ready = 1,
                                         } };
-                                        const HSIDIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const HSIDIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
                                             NotReady = 0,
                                             Ready = 1,
                                         } };
@@ -481,9 +483,10 @@ pub const Bus = enum(bus_type) {
                         .PWR => enum(bus_type) {
                             CR1 = Reg(0x0, port), // PWR control register 1 (PWR_CR1)
                             fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
                                     .CR1 => enum {
-                                        const DBP = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = @intFromEnum(reg), .values = enum(u1) {
+                                        const DBP = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             Enabled = 1,
                                             Disabled = 0,
                                         } };
