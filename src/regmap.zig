@@ -117,11 +117,13 @@ fn API(comptime port: anytype) enum_type {
                 PLL12,
                 PLL3,
                 PLL4,
+                MPU,
                 pub fn source(comptime mux: MUX) enum_type {
                     return comptime switch (mux) {
                         .PLL12 => enum(u2) { HSI = 0, HSE = 1, Off },
                         .PLL3 => enum(u2) { HSI = 0, HSE = 1, CSI = 2, Off = 3 },
                         .PLL4 => enum(u2) { HSI = 0, HSE = 1, CSI = 2, EXT_I2S = 3 },
+                        .MPU => enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 },
                     };
                 }
                 pub fn setSource(comptime self: MUX, comptime src: anytype) void {
@@ -473,6 +475,7 @@ pub const Bus = enum(bus_type) {
                             MP_APB1ENSETR = Reg(0xA00, port), // RCC APB1 peripheral enable for MPU set register (RCC_MP_APB1ENSETR)
                             MP_AHB4ENSETR = Reg(0xA28, port), // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
                             MP_AHB4ENCLRR = Reg(0xA2C, port), // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
+                            MPCKSELR = Reg(0x20, port), // RCC MPU clock selection register (RCC_MPCKSELR)
                             RCK12SELR = Reg(0x28, port), // RCC PLL 1 and 2 reference clock selection register (RCC_RCK12SELR)
                             RCK3SELR = Reg(0x820, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
                             RCK4SELR = Reg(0x824, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
@@ -497,6 +500,13 @@ pub const Bus = enum(bus_type) {
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .MPCKSELR => enum {
+                                        const MPUSRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const MPUSRC = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.MPU) };
+                                    },
                                     .PLL1CR, .PLL2CR, .PLL3CR, .PLL4CR => enum {
                                         const DIVREN = Field{ .rw = .ReadWrite, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
                                             Disabled = 0,

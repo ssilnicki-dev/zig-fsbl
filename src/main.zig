@@ -2,12 +2,20 @@ const Mem = @import("regmap.zig");
 
 const console = Mem.Bus.APB1.ports().UART4.api();
 const RCC = Mem.Bus.AHB4.ports().RCC.api();
+const MUX = RCC.MUX;
+const PLL = RCC.PLL;
 const LED = Mem.Bus.AHB4.ports().GPIOA.api().pin(13);
 
 export fn main() u8 {
     // RCC init
     RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
     RCC.HSE.init(RCC.EXT_CLOCK_MODE.Crystal);
+
+    // MPU clock source
+    MUX.PLL12.setSource(MUX.source(MUX.PLL12).HSE); // Prepare MPU clock source
+    PLL.PLL1.setDividers(2, 80, 2048, 0, 1, 1); // -> 650 MHz on DIVP PLL1 port
+    PLL.PLL1.enableOutput(PLL.OUTPUT.P); // Enable MPU source clock output
+    MUX.MPU.setSource(MUX.source(MUX.MPU).PLL1); // Switch to new MPU clock source
 
     // UART pins SoC dependant
     const uart_rx_pin = Mem.Bus.AHB4.ports().GPIOB.api().pin(2);
