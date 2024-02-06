@@ -113,6 +113,90 @@ fn API(comptime port: anytype) enum_type {
                     while (HSERDY.getEnumValue() != HSERDY.values.Ready) {}
                 }
             };
+            pub const MUX = enum {
+                PLL12,
+                PLL3,
+                PLL4,
+                pub fn source(comptime mux: MUX) enum_type {
+                    return comptime switch (mux) {
+                        .PLL12 => enum(u2) { HSI = 0, HSE = 1, Off },
+                        .PLL3 => enum(u2) { HSI = 0, HSE = 1, CSI = 2, Off = 3 },
+                        .PLL4 => enum(u2) { HSI = 0, HSE = 1, CSI = 2, EXT_I2S = 3 },
+                    };
+                }
+                pub fn setSource(comptime self: MUX, comptime src: anytype) void {
+                    const SRC = comptime switch (self) {
+                        .PLL12 => port.regs().RCK12SELR.fields().PLL12SRC,
+                        .PLL3 => port.regs().RCK3SELR.fields().PLL3SRC,
+                        .PLL4 => port.regs().RCK4SELR.fields().PLL4SRC,
+                        .MPU => port.regs().MPCKSELR.fields().MPUSRC,
+                    };
+                    const RDY = comptime switch (self) {
+                        .PLL12 => port.regs().RCK12SELR.fields().PLL12SRCRDY,
+                        .PLL3 => port.regs().RCK3SELR.fields().PLL3SRCRDY,
+                        .PLL4 => port.regs().RCK4SELR.fields().PLL4SRCRDY,
+                        .MPU => port.regs().MPCKSELR.fields().MPUSRCRDY,
+                    };
+                    SRC.set(src);
+                    while (RDY.getEnumValue() != RDY.values.Ready) {}
+                }
+            };
+            pub const PLL = enum {
+                PLL1,
+                PLL2,
+                PLL3,
+                PLL4,
+                pub const OUTPUT = enum { P, Q, R };
+                // as per RM0436 Rev 6, p.621
+                pub fn enableOutput(comptime pll: @This(), comptime divout: OUTPUT) void {
+                    const DIVEN = comptime switch (divout) {
+                        .P => getCR(pll).DIVPEN,
+                        .Q => getCR(pll).DIVQEN,
+                        .R => getCR(pll).DIVREN,
+                    };
+                    DIVEN.set(DIVEN.values.Enabled);
+                }
+                // as per RM0436 Rev 6, p.621
+                pub fn setDividers(comptime pll: PLL, comptime m: u6, comptime n: u9, comptime frac: u16, comptime p: u7, comptime q: u7, comptime r: u7) void {
+                    const PLLCFG1R = comptime switch (pll) {
+                        .PLL1 => port.regs().PLL1CFGR1.fields(),
+                        .PLL2 => port.regs().PLL2CFGR1.fields(),
+                        .PLL3 => port.regs().PLL3CFGR1.fields(),
+                        .PLL4 => port.regs().PLL4CFGR1.fields(),
+                    };
+                    const PLLCFG2R = comptime switch (pll) {
+                        .PLL1 => port.regs().PLL1CFGR2.fields(),
+                        .PLL2 => port.regs().PLL2CFGR2.fields(),
+                        .PLL3 => port.regs().PLL3CFGR2.fields(),
+                        .PLL4 => port.regs().PLL4CFGR2.fields(),
+                    };
+                    const PLLFRACR = comptime switch (pll) {
+                        .PLL1 => port.regs().PLL1FRACR.fields(),
+                        .PLL2 => port.regs().PLL2FRACR.fields(),
+                        .PLL3 => port.regs().PLL3FRACR.fields(),
+                        .PLL4 => port.regs().PLL4FRACR.fields(),
+                    };
+                    PLLCFG1R.DIVM.set(m);
+                    PLLFRACR.FRACLE.set(0);
+                    PLLFRACR.FRACV.set(frac);
+                    PLLFRACR.FRACLE.set(1);
+                    PLLCFG1R.DIVN.set(n);
+                    PLLCFG2R.DIVP.set(p);
+                    PLLCFG2R.DIVQ.set(q);
+                    PLLCFG2R.DIVR.set(r);
+                    const PLLCR = getCR(pll);
+                    PLLCR.PLLON.set(PLLCR.PLLON.values.On);
+                    while (PLLCR.PLLRDY.getEnumValue() != PLLCR.PLLRDY.values.Locked) {}
+                }
+                fn getCR(comptime pll: @This()) enum_type {
+                    return comptime switch (pll) {
+                        .PLL1 => port.regs().PLL1CR.fields(),
+                        .PLL2 => port.regs().PLL2CR.fields(),
+                        .PLL3 => port.regs().PLL3CR.fields(),
+                        .PLL4 => port.regs().PLL4CR.fields(),
+                    };
+                }
+            };
         },
 
         pwr => enum(bus_type) {
@@ -389,9 +473,111 @@ pub const Bus = enum(bus_type) {
                             MP_APB1ENSETR = Reg(0xA00, port), // RCC APB1 peripheral enable for MPU set register (RCC_MP_APB1ENSETR)
                             MP_AHB4ENSETR = Reg(0xA28, port), // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
                             MP_AHB4ENCLRR = Reg(0xA2C, port), // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
+                            RCK12SELR = Reg(0x28, port), // RCC PLL 1 and 2 reference clock selection register (RCC_RCK12SELR)
+                            RCK3SELR = Reg(0x820, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
+                            RCK4SELR = Reg(0x824, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
+                            PLL1CR = Reg(0x80, port), // RCC PLL1 control register (RCC_PLL1CR)
+                            PLL1CFGR1 = Reg(0x84, port), // RCC PLL1 configuration register 1 (RCC_PLL1CFGR1)
+                            PLL1CFGR2 = Reg(0x88, port), // RCC PLL1 configuration register 2 (RCC_PLL1CFGR2)
+                            PLL1FRACR = Reg(0x8C, port), // RCC PLL1 fractional register (RCC_PLL1FRACR)
+                            PLL1CSGR = Reg(0x90, port), // RCC PLL1 clock spreading generator register (RCC_PLL1CSGR)
+                            PLL2CR = Reg(0x94, port), // RCC PLL2 control register (RCC_PLL2CR)
+                            PLL2CFGR1 = Reg(0x98, port), // RCC PLL2 configuration register 1 (RCC_PLL2CFGR1)
+                            PLL2CFGR2 = Reg(0x9C, port), // RCC PLL2 configuration register 2 (RCC_PLL2CFGR2)
+                            PLL2FRACR = Reg(0xA0, port), // RCC PLL2 fractional register (RCC_PLL2FRACR)
+                            PLL2CSGR = Reg(0xA4, port), // RCC PLL2 clock spreading generator register (RCC_PLL2CSGR)
+                            PLL3CR = Reg(0x880, port), // RCC PLL3 control register (RCC_PLL3CR)
+                            PLL3CFGR1 = Reg(0x884, port), // RCC PLL3 configuration register 1 (RCC_PLL3CFGR1)
+                            PLL3CFGR2 = Reg(0x888, port), // RCC PLL3 configuration register 2 (RCC_PLL3CFGR2)
+                            PLL3FRACR = Reg(0x88C, port), // RCC PLL3 fractional register (RCC_PLL3FRACR)
+                            PLL4CR = Reg(0x894, port), // RCC PLL4 control register (RCC_PLL4CR)
+                            PLL4CFGR1 = Reg(0x898, port), // RCC PLL4 configuration register 1 (RCC_PLL4CFGR1)
+                            PLL4CFGR2 = Reg(0x89C, port), // RCC PLL4 configuration register 2 (RCC_PLL4CFGR2)
+                            PLL4FRACR = Reg(0x8A0, port), // RCC PLL4 fractional register (RCC_PLL4FRACR)
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .PLL1CR, .PLL2CR, .PLL3CR, .PLL4CR => enum {
+                                        const DIVREN = Field{ .rw = .ReadWrite, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DIVQEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 5, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DIVPEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 4, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const SSCG_CTRL = Field{ .rw = .ReadWrite, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const PLLRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Unlocked = 0,
+                                            Locked = 1,
+                                        } };
+                                        const PLLON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Off = 0,
+                                            On = 1,
+                                        } };
+                                    },
+                                    .PLL1CFGR1, .PLL2CFGR1 => enum {
+                                        const DIVM = Field{ .rw = .ReadWrite, .width = u6, .shift = 16, .reg = addr, .values = enum {} };
+                                        const DIVN = Field{ .rw = .ReadWrite, .width = u9, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .PLL3CFGR1, .PLL4CFGR1 => enum {
+                                        const IFRGE = Field{ .rw = .ReadWrite, .width = u2, .shift = 24, .reg = addr, .values = enum {} };
+                                        const DIVM = Field{ .rw = .ReadWrite, .width = u6, .shift = 16, .reg = addr, .values = enum {} };
+                                        const DIVN = Field{ .rw = .ReadWrite, .width = u9, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .PLL1CFGR2, .PLL2CFGR2, .PLL3CFGR2, .PLL4CFGR2 => enum {
+                                        const DIVR = Field{ .rw = .ReadWrite, .width = u7, .shift = 16, .reg = addr, .values = enum {} };
+                                        const DIVQ = Field{ .rw = .ReadWrite, .width = u7, .shift = 8, .reg = addr, .values = enum {} };
+                                        const DIVP = Field{ .rw = .ReadWrite, .width = u7, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .PLL1FRACR, .PLL2FRACR, .PLL3FRACR, .PLL4FRACR => enum {
+                                        const FRACLE = Field{ .rw = .ReadWrite, .width = u1, .shift = 16, .reg = addr, .values = enum {} };
+                                        const FRACV = Field{ .rw = .ReadWrite, .width = u13, .shift = 3, .reg = addr, .values = enum {} };
+                                    },
+                                    .PLL1CSGR, .PLL2CSGR => enum {
+                                        const INC_STEP = Field{ .rw = .ReadWrite, .width = u15, .shift = 16, .reg = addr, .values = enum {} };
+                                        const SSCG_MODE = Field{ .rw = .ReadWrite, .width = u1, .shift = 15, .reg = addr, .values = enum(u1) {
+                                            CenterSpread = 0,
+                                            DownSpread = 1,
+                                        } };
+                                        const RPDFN_DIS = Field{ .rw = .ReadWrite, .width = u1, .shift = 14, .reg = addr, .values = enum(u1) {
+                                            InjectionEnabled = 0,
+                                            InhjectionDisabled = 1,
+                                        } };
+                                        const TPDFN_DIS = Field{ .rw = .ReadWrite, .width = u1, .shift = 13, .reg = addr, .values = enum(u1) {
+                                            InjectionEnabled = 0,
+                                            InhjectionDisabled = 1,
+                                        } };
+                                        const MOD_PER = Field{ .rw = .ReadWrite, .width = u13, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .RCK4SELR => enum {
+                                        const PLL4SRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const PLL4SRC = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.PLL4) };
+                                    },
+                                    .RCK3SELR => enum {
+                                        const PLL3SRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const PLL3SRC = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.PLL3) };
+                                    },
+                                    .RCK12SELR => enum {
+                                        const PLL12SRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const PLL12SRC = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.PLL12) };
+                                    },
                                     .HSICFGR => enum {
                                         const HSIDIV = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = enum(u2) {
                                             One = 0,
@@ -452,7 +638,6 @@ pub const Bus = enum(bus_type) {
                                             Clear = 1,
                                         } };
                                     },
-
                                     .BDCR => enum {
                                         const LSEON = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
                                             Off = 0,
