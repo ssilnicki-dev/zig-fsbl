@@ -167,17 +167,37 @@ fn API(comptime port: anytype) enum_type {
                     OCENCLRR.HSION.set(OCENCLRR.HSION.values.Clear);
                 }
             };
+            pub const AXI = enum {
+                pub fn setDividers(comptime axi: u3, comptime apb4: u3, comptime apb5: u3) void {
+                    const AXIDIVR = port.regs().AXIDIVR.fields();
+                    const APB4DIVR = port.regs().APB4DIVR.fields();
+                    const APB5DIVR = port.regs().APB5DIVR.fields();
+
+                    AXIDIVR.AXIDIV.set(axi);
+                    while (AXIDIVR.AXIDIVRDY.getEnumValue() != AXIDIVR.AXIDIVRDY.values.Ready) {}
+
+                    APB4DIVR.APB4DIV.set(apb4);
+                    while (APB4DIVR.APB4DIVRDY.getEnumValue() != APB4DIVR.APB4DIVRDY.values.Ready) {}
+
+                    APB5DIVR.APB5DIV.set(apb5);
+                    while (APB5DIVR.APB5DIVRDY.getEnumValue() != APB5DIVR.APB5DIVRDY.values.Ready) {}
+                }
+            };
             pub const MUX = enum {
                 PLL12,
                 PLL3,
                 PLL4,
                 MPU,
+                AXI,
+                MCU,
                 pub fn source(comptime mux: MUX) enum_type {
                     return comptime switch (mux) {
                         .PLL12 => enum(u2) { HSI = 0, HSE = 1, Off },
                         .PLL3 => enum(u2) { HSI = 0, HSE = 1, CSI = 2, Off = 3 },
                         .PLL4 => enum(u2) { HSI = 0, HSE = 1, CSI = 2, EXT_I2S = 3 },
                         .MPU => enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 },
+                        .AXI => enum(u2) { HSI = 0, HSE = 1, PLL2 = 2 },
+                        .MCU => enum(u2) { HSI = 0, HSE = 1, CSI = 2, PLL3 = 3 },
                     };
                 }
                 pub fn setSource(comptime self: MUX, comptime src: anytype) void {
@@ -186,12 +206,16 @@ fn API(comptime port: anytype) enum_type {
                         .PLL3 => port.regs().RCK3SELR.fields().PLL3SRC,
                         .PLL4 => port.regs().RCK4SELR.fields().PLL4SRC,
                         .MPU => port.regs().MPCKSELR.fields().MPUSRC,
+                        .AXI => port.regs().ASSCKSELR.fields().AXISSRC,
+                        .MCU => port.regs().MSSCKSELR.fields().MCUSSRC,
                     };
                     const RDY = comptime switch (self) {
                         .PLL12 => port.regs().RCK12SELR.fields().PLL12SRCRDY,
                         .PLL3 => port.regs().RCK3SELR.fields().PLL3SRCRDY,
                         .PLL4 => port.regs().RCK4SELR.fields().PLL4SRCRDY,
                         .MPU => port.regs().MPCKSELR.fields().MPUSRCRDY,
+                        .AXI => port.regs().ASSCKSELR.fields().AXISSRCRDY,
+                        .MCU => port.regs().MSSCKSELR.fields().MCUSSRCRDY,
                     };
                     SRC.set(src);
                     while (RDY.getEnumValue() != RDY.values.Ready) {}
@@ -584,6 +608,8 @@ pub const Bus = enum(bus_type) {
                             MP_AHB4ENSETR = Reg(0xA28, port), // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
                             MP_AHB4ENCLRR = Reg(0xA2C, port), // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
                             MPCKSELR = Reg(0x20, port), // RCC MPU clock selection register (RCC_MPCKSELR)
+                            ASSCKSELR = Reg(0x24, port), // RCC AXI sub-system clock selection register (RCC_ASSCKSELR)
+                            MSSCKSELR = Reg(0x48, port), // RCC MCU sub-system clock selection register (RCC_MSSCKSELR)
                             MPCKDIVR = Reg(0x2C, port), // RCC MPU clock divider register (RCC_MPCKDIVR)
                             RCK12SELR = Reg(0x28, port), // RCC PLL 1 and 2 reference clock selection register (RCC_RCK12SELR)
                             RCK3SELR = Reg(0x820, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
@@ -606,9 +632,33 @@ pub const Bus = enum(bus_type) {
                             PLL4CFGR1 = Reg(0x898, port), // RCC PLL4 configuration register 1 (RCC_PLL4CFGR1)
                             PLL4CFGR2 = Reg(0x89C, port), // RCC PLL4 configuration register 2 (RCC_PLL4CFGR2)
                             PLL4FRACR = Reg(0x8A0, port), // RCC PLL4 fractional register (RCC_PLL4FRACR)
+                            AXIDIVR = Reg(0x30, port), // RCC AXI clock divider register (RCC_AXIDIVR)
+                            APB4DIVR = Reg(0x3C, port), // RCC APB4 clock divider register (RCC_APB4DIVR)
+                            APB5DIVR = Reg(0x40, port), // RCC APB5 clock divider register (RCC_APB5DIVR)
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .APB5DIVR => enum {
+                                        const APB5DIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const APB5DIV = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .APB4DIVR => enum {
+                                        const APB4DIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const APB4DIV = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .AXIDIVR => enum {
+                                        const AXIDIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const AXIDIV = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
                                     .MPCKDIVR => enum {
                                         const MPUDIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
                                             NotReady = 0,
@@ -620,6 +670,20 @@ pub const Bus = enum(bus_type) {
                                             Four = 2,
                                             Eight = 3,
                                         } };
+                                    },
+                                    .ASSCKSELR => enum {
+                                        const AXISSRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const AXISSRC = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.AXI) };
+                                    },
+                                    .MSSCKSELR => enum {
+                                        const MCUSSRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const MCUSSRC = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.MCU) };
                                     },
                                     .MPCKSELR => enum {
                                         const MPUSRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
