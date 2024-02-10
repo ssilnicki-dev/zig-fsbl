@@ -3,6 +3,9 @@ const bus_type: type = u32;
 const enum_type: type = @TypeOf(enum {});
 
 const HSI_FRIQUENCY = 64000000;
+const HSE_FRIQUENCY = 24000000; // SoM dependant
+var system_clock_hz: u32 = HSI_FRIQUENCY;
+var cycle_counter_enabled: bool = false;
 
 const Field = struct {
     pub const shift_type = switch (bus_type) {
@@ -85,6 +88,51 @@ fn API(comptime port: anytype) enum_type {
 
     return comptime switch (current_port) {
         rcc => enum(bus_type) {
+            inline fn resetCycleCounter() void {
+                var value: u32 = undefined;
+                asm volatile (
+                    \\ mrc p15, 0, %[value], c9, c12, 0
+                    : [value] "=r" (value),
+                ); // read
+                value |= (1 << 2) | 1;
+                asm volatile (
+                    \\ mcr p15, 0, %[value], c9, c12, 0
+                    :
+                    : [value] "r" (value),
+                    : "memory"
+                ); // write modified
+            }
+            inline fn readCycleCounter() u32 {
+                var value: u32 = undefined;
+                asm volatile (
+                    \\ mrc p15, 0, %[value], c9, c13, 0
+                    : [value] "=r" (value),
+                );
+                return value;
+            }
+            pub fn udelay(usec: u32) void {
+                if (!cycle_counter_enabled)
+                    enableCycleCounter();
+                resetCycleCounter();
+                const delay = getSystemClockHz() / 1_000_000 * usec;
+                while (readCycleCounter() < delay) {}
+            }
+
+            inline fn enableCycleCounter() void {
+                var value: u32 = undefined;
+                asm volatile (
+                    \\ mrc p15, 0, %[result], c9, c12, 1
+                    : [result] "=r" (value),
+                );
+                value |= 0x80000000;
+                asm volatile (
+                    \\ mcr p15, 0, %[reg], c9, c12, 1
+                    :
+                    : [reg] "r" (value),
+                    : "memory"
+                );
+                cycle_counter_enabled = true;
+            }
             pub const EXT_CLOCK_MODE = enum { Crystal };
             pub const LSE = struct {
                 pub fn init(comptime mode: EXT_CLOCK_MODE) void { // RM0436 Rev 6, p.531
@@ -147,8 +195,62 @@ fn API(comptime port: anytype) enum_type {
                     };
                     SRC.set(src);
                     while (RDY.getEnumValue() != RDY.values.Ready) {}
+
+                    switch (self) {
+                        .PLL12, .MPU => {
+                            system_clock_hz = calculateSystemClockHz();
+                        },
+                        else => {},
+                    }
                 }
             };
+            inline fn getSystemClockHz() u32 {
+                return system_clock_hz;
+            }
+            fn calculateSystemClockHz() u32 {
+                const PLL12SRC = port.regs().RCK12SELR.fields().PLL12SRC;
+                const PLL12SRCRDY = port.regs().RCK12SELR.fields().PLL12SRCRDY;
+                const HSIDIV = port.regs().HSICFGR.fields().HSIDIV;
+                const MPUSRC = port.regs().MPCKSELR.fields().MPUSRC;
+                const MPUSRCRDY = port.regs().MPCKSELR.fields().MPUSRCRDY;
+                while (MPUSRCRDY.getEnumValue() != MPUSRCRDY.values.Ready) {}
+                const MPUMUX = MPUSRC.getEnumValue();
+                switch (MPUMUX) {
+                    .HSI => {
+                        return HSI_FRIQUENCY;
+                    },
+                    .HSE => {
+                        return HSE_FRIQUENCY;
+                    },
+                    .PLL1, .PLL1DIV => {
+                        while (PLL12SRCRDY.getEnumValue() != PLL12SRCRDY.values.Ready) {}
+                        const PLLCFG1R = port.regs().PLL1CFGR1.fields();
+                        const MPUDIVR = port.regs().MPCKDIVR.fields();
+                        const divm = PLLCFG1R.DIVM.getIntValue();
+                        const divn = PLLCFG1R.DIVN.getIntValue();
+                        const frac = port.regs().PLL1FRACR.fields().FRACV.getIntValue();
+                        const divp = port.regs().PLL1CFGR2.fields().DIVP.getIntValue();
+                        const ref: u32 = switch (PLL12SRC.getEnumValue()) {
+                            .HSE => HSE_FRIQUENCY,
+                            .HSI => @as(u32, HSI_FRIQUENCY) >> @truncate(HSIDIV.getIntValue()),
+                            .Off => return 0,
+                        } / (divm + 1) * 2;
+
+                        const result: u32 = ((ref / 1_000 * frac / 8192) * 1_000 + ref * (divn + 1)) / 2 / (divp + 1);
+
+                        switch (MPUMUX) {
+                            .PLL1DIV => {
+                                switch (MPUDIVR.MPUDIV.getEnumValue()) {
+                                    .Off => return 0,
+                                    else => return result >> @truncate(MPUDIVR.MPUDIV.getIntValue()),
+                                }
+                            },
+                            else => return result,
+                        }
+                    },
+                }
+            }
+
             pub const PLL = enum {
                 PLL1,
                 PLL2,
@@ -482,6 +584,7 @@ pub const Bus = enum(bus_type) {
                             MP_AHB4ENSETR = Reg(0xA28, port), // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
                             MP_AHB4ENCLRR = Reg(0xA2C, port), // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
                             MPCKSELR = Reg(0x20, port), // RCC MPU clock selection register (RCC_MPCKSELR)
+                            MPCKDIVR = Reg(0x2C, port), // RCC MPU clock divider register (RCC_MPCKDIVR)
                             RCK12SELR = Reg(0x28, port), // RCC PLL 1 and 2 reference clock selection register (RCC_RCK12SELR)
                             RCK3SELR = Reg(0x820, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
                             RCK4SELR = Reg(0x824, port), // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
@@ -506,6 +609,18 @@ pub const Bus = enum(bus_type) {
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .MPCKDIVR => enum {
+                                        const MPUDIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Ready = 1,
+                                        } };
+                                        const MPUDIV = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = enum(u2) {
+                                            Off = 0,
+                                            Two = 1,
+                                            Four = 2,
+                                            Eight = 3,
+                                        } };
+                                    },
                                     .MPCKSELR => enum {
                                         const MPUSRCRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
                                             NotReady = 0,
