@@ -113,6 +113,12 @@ fn API(comptime port: anytype) enum_type {
                     while (HSERDY.getEnumValue() != HSERDY.values.Ready) {}
                 }
             };
+            pub const HSI = enum {
+                pub fn disable() void {
+                    const OCENCLRR = port.regs().OCENCLRR.fields();
+                    OCENCLRR.HSION.set(OCENCLRR.HSION.values.Clear);
+                }
+            };
             pub const MUX = enum {
                 PLL12,
                 PLL3,
@@ -633,6 +639,9 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .OCENSETR => enum {
+                                        const HSION = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
                                         const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
@@ -641,6 +650,9 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .OCENCLRR => enum {
+                                        const HSION = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
                                         const HSEON = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             Clear = 1,
                                         } };
