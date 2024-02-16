@@ -23,8 +23,32 @@ const Field = struct {
     shift: shift_type,
     values: enum_type,
 
+    fn setZeros(comptime self: Field) void {
+        self.setValueImpl(0);
+    }
+
+    fn intToEnum(comptime self: Field, comptime value: bus_type) self.values {
+        comptime if (@typeInfo(self.values).Enum.fields.len == 0)
+            unreachable;
+        return @as(self.values, @enumFromInt((value & self.getMask()) >> self.shift));
+    }
+
+    fn getShift(comptime self: Field) shift_type {
+        return self.shift;
+    }
+
+    fn enumToInt(comptime self: Field, comptime value: anytype) bus_type {
+        comptime if (@typeInfo(self.values).Enum.fields.len == 0)
+            unreachable;
+        return @as(bus_type, @intFromEnum(@as(self.values, value))) << self.shift;
+    }
+
     inline fn getMask(comptime self: Field) bus_type {
-        return @as(bus_type, (1 << @bitSizeOf(self.width)) - 1);
+        return @as(bus_type, (1 << @bitSizeOf(self.width)) - 1) << self.shift;
+    }
+
+    inline fn getResetMask(comptime self: Field) bus_type {
+        return ~self.getMask();
     }
 
     pub fn set(comptime self: Field, value: anytype) void {
@@ -40,24 +64,17 @@ const Field = struct {
             addr.* = value << self.shift;
             return;
         }
-        var v = addr.*;
-        const mask = self.getMask();
-
-        v &= ~(mask << self.shift);
-        v |= (value & mask) << self.shift;
-        addr.* = v;
+        addr.* = addr.* & self.getResetMask() | ((value << self.shift) & self.getMask());
     }
 
     inline fn setEnumValue(comptime self: Field, value: self.values) void {
-        comptime if (@typeInfo(self.values).Enum.fields.len == 0)
+        comptime if (@typeInfo(self.values).Enum.fields.len == 0 or self.rw == .ReadOnly)
             unreachable;
         self.setValueImpl(@intFromEnum(value));
     }
 
     inline fn setIntValue(comptime self: Field, value: bus_type) void {
-        comptime if (@typeInfo(self.values).Enum.fields.len > 0)
-            unreachable;
-        comptime if (self.rw == .ReadOnly)
+        comptime if (@typeInfo(self.values).Enum.fields.len > 0 or self.rw == .ReadOnly)
             unreachable;
         self.setValueImpl(value);
     }
