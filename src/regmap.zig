@@ -100,10 +100,218 @@ fn API(comptime port: anytype) enum_type {
     const rcc = @intFromEnum(Bus.AHB4.ports().RCC);
     const pwr = @intFromEnum(Bus.AHB4.ports().PWR);
     const uart4 = @intFromEnum(Bus.APB1.ports().UART4);
+    const ddr = @intFromEnum(Bus.APB4.ports().DDR);
+    const tzc = @intFromEnum(Bus.APB5.ports().TZC);
 
     const current_port = @intFromEnum(port);
 
     return comptime switch (current_port) {
+        tzc => enum(bus_type) {
+            pub fn initSecureDDRAccess() void {
+                Bus.AHB4.ports().RCC.regs().MP_APB5ENSETR.fields().TZC1EN.setEnumValue(.Set);
+                Bus.AHB4.ports().RCC.regs().MP_APB5ENSETR.fields().TZC2EN.setEnumValue(.Set);
+                const GATE_KEEPER = port.regs().GATE_KEEPER.fields();
+                GATE_KEEPER.OPENREQ_FLT0.setEnumValue(.Opened);
+                GATE_KEEPER.OPENREQ_FLT1.setEnumValue(.Opened);
+                port.regs().ID_ACCESS0.fields().NSAID_WR_EN.set(0xFFFF);
+                port.regs().ID_ACCESS0.fields().NSAID_RD_EN.set(0xFFFF);
+                port.regs().ATTRIBUTE0.fields().S_WR_EN.setEnumValue(.Permitted);
+                port.regs().ATTRIBUTE0.fields().S_RD_EN.setEnumValue(.Permitted);
+                GATE_KEEPER.OPENREQ_FLT0.setEnumValue(.Closed);
+                GATE_KEEPER.OPENREQ_FLT1.setEnumValue(.Closed);
+                Bus.AHB4.ports().RCC.regs().MP_APB5ENSETR.fields().TZPCEN.setEnumValue(.Set);
+                port.regs().SPECULATION_CTRL.fields().WRITESPEC_DISABLE.setEnumValue(.Asserted);
+                port.regs().SPECULATION_CTRL.fields().READSPEC_DISABLE.setEnumValue(.Asserted);
+            }
+        },
+        ddr => enum(bus_type) {
+            pub fn regs() enum_type {
+                return port.regs();
+            }
+
+            pub fn init(comptime reg_values: REGS_VALUES) bool {
+                const udelay = Bus.AHB4.ports().RCC.api().udelay;
+                const DDRITFCR = Bus.AHB4.ports().RCC.regs().DDRITFCR.fields();
+
+                DDRITFCR.AXIDCGEN.setEnumValue(.Disabled);
+
+                DDRITFCR.DDRCAPBRST.setEnumValue(.Asserted);
+                DDRITFCR.DDRCAXIRST.setEnumValue(.Asserted);
+                DDRITFCR.DDRCORERST.setEnumValue(.Asserted);
+                DDRITFCR.DPHYAPBRST.setEnumValue(.Asserted);
+                DDRITFCR.DPHYRST.setEnumValue(.Asserted);
+                DDRITFCR.DPHYCTLRST.setEnumValue(.Asserted);
+
+                DDRITFCR.DDRC1EN.setEnumValue(.Enabled);
+                DDRITFCR.DDRC2EN.setEnumValue(.Enabled);
+                DDRITFCR.DDRCAPBEN.setEnumValue(.Enabled);
+                DDRITFCR.DDRPHYCAPBEN.setEnumValue(.Enabled);
+                DDRITFCR.DDRPHYCEN.setEnumValue(.Enabled);
+
+                DDRITFCR.DPHYRST.setEnumValue(.Cleared);
+                DDRITFCR.DPHYCTLRST.setEnumValue(.Cleared);
+                DDRITFCR.DDRCAPBRST.setEnumValue(.Cleared);
+
+                udelay(2);
+
+                regs().DFIMISC.fields().DFI_INIT_COMPLETE_EN.setEnumValue(.Cleared);
+                setRegs(reg_values.ctrl.reg);
+                setRegs(reg_values.ctrl.timing);
+                setRegs(reg_values.ctrl.map);
+                regs().INIT0.fields().SKIP_DRAM_INIT.setEnumValue(.InitSkippedNormal);
+                setRegs(reg_values.ctrl.perf);
+
+                DDRITFCR.DDRCORERST.setEnumValue(.Cleared);
+                DDRITFCR.DDRCAXIRST.setEnumValue(.Cleared);
+                DDRITFCR.DPHYAPBRST.setEnumValue(.Cleared);
+
+                setRegs(reg_values.phy.reg);
+                setRegs(reg_values.phy.timing);
+
+                if (!ddrphyInitWait())
+                    return false;
+
+                const PIR = regs().PIR.fields();
+                var pir = PIR.DLLSRST.enumToInt(.Asserted);
+                pir |= PIR.DLLLOCK.enumToInt(.Asserted);
+                pir |= PIR.ZCAL.enumToInt(.Asserted);
+                pir |= PIR.ITMSRST.enumToInt(.Asserted);
+                pir |= PIR.DRAMINIT.enumToInt(.Asserted);
+                pir |= PIR.ICPC.enumToInt(.PhyAndPubl);
+                pir |= PIR.INIT.enumToInt(.Asserted);
+                if (regs().MSTR.fields().DDR3.getEnumValue() == .DDR3) {
+                    pir |= PIR.DRAMRST.enumToInt(.Asserted);
+                }
+                regs().PIR.ptr().* = pir;
+                udelay(10);
+                if (!ddrphyInitWait())
+                    return false;
+
+                startSwDone();
+                regs().DFIMISC.fields().DFI_INIT_COMPLETE_EN.setEnumValue(.Asserted);
+                waitSwDone();
+
+                normalOpModeWait();
+
+                startSwDone();
+                regs().RFSHCTL3.fields().DIS_AUTO_REFRESH.setEnumValue(.Asserted);
+                regs().PWRCTL.fields().SELFREF_EN.setEnumValue(.Disabled);
+                regs().PWRCTL.fields().POWERDOWN_EN.setEnumValue(.Disabled);
+                regs().DFIMISC.fields().DFI_INIT_COMPLETE_EN.setEnumValue(.Cleared);
+                waitSwDone();
+
+                pir = PIR.QSTRN.enumToInt(.Asserted);
+                pir |= PIR.INIT.enumToInt(.Asserted);
+                if (regs().MSTR.fields().DDR3.getEnumValue() != .DDR3) {
+                    pir |= PIR.RVTRN.enumToInt(.Asserted);
+                }
+                regs().PIR.ptr().* = pir;
+                udelay(10);
+
+                if (!ddrphyInitWait())
+                    return false;
+
+                startSwDone();
+                if (regs().RFSHCTL3.fields().DIS_AUTO_REFRESH.intToEnum(findRegValue(reg_values.ctrl.reg, regs().RFSHCTL3)) == .Cleared)
+                    regs().RFSHCTL3.fields().DIS_AUTO_REFRESH.setEnumValue(.Cleared);
+                if (regs().PWRCTL.fields().POWERDOWN_EN.intToEnum(findRegValue(reg_values.ctrl.reg, regs().PWRCTL)) == .Enabled)
+                    regs().PWRCTL.fields().POWERDOWN_EN.setEnumValue(.Enabled);
+                if (regs().PWRCTL.fields().SELFREF_EN.intToEnum(findRegValue(reg_values.ctrl.reg, regs().PWRCTL)) == .Enabled)
+                    regs().PWRCTL.fields().SELFREF_EN.setEnumValue(.Enabled);
+                regs().DFIMISC.fields().DFI_INIT_COMPLETE_EN.setEnumValue(.Asserted);
+                waitSwDone();
+
+                if (regs().PWRCTL.fields().EN_DFI_DRAM_CLK_DISABLE.intToEnum(findRegValue(reg_values.ctrl.reg, regs().PWRCTL)) != .Cleared) {
+                    DDRITFCR.DDRCKMOD.setEnumValue(.AutoSelfRef);
+                    startSwDone();
+                    regs().HWLPCTL.fields().HW_LP_EN.setEnumValue(.Enabled);
+                    regs().PWRTMG.fields().POWERDOWN_TO_X32.set(0x10);
+                    regs().PWRTMG.fields().SELFREF_TO_X32.set(0x1);
+                    regs().PWRCTL.fields().EN_DFI_DRAM_CLK_DISABLE.setEnumValue(.Asserted);
+                    if (regs().PWRCTL.fields().SELFREF_EN.intToEnum(findRegValue(reg_values.ctrl.reg, regs().PWRCTL)) == .Enabled) {
+                        regs().PWRCTL.fields().SELFREF_EN.setEnumValue(.Enabled);
+                    }
+                    regs().DFIMISC.fields().DFI_INIT_COMPLETE_EN.setEnumValue(.Asserted);
+                    waitSwDone();
+                }
+
+                regs().PCTRL_0.fields().PORT_EN.setEnumValue(.Enabled);
+                regs().PCTRL_1.fields().PORT_EN.setEnumValue(.Enabled);
+
+                DDRITFCR.AXIDCGEN.setEnumValue(.Enabled);
+
+                return true;
+            }
+
+            fn findRegValue(comptime reg_values: anytype, comptime reg: anytype) bus_type {
+                for (reg_values) |reg_value| {
+                    if (@intFromPtr(reg_value.ptr) == @intFromPtr(reg.ptr())) {
+                        return reg_value.value;
+                    }
+                }
+                return 0;
+            }
+
+            inline fn startSwDone() void {
+                regs().SWCTL.fields().SW_DONE.setEnumValue(.Enable);
+            }
+            inline fn waitSwDone() void {
+                regs().SWCTL.fields().SW_DONE.setEnumValue(.Disable);
+                while (regs().SWSTAT.fields().SW_DONE_ACK.getEnumValue() != .Done) {}
+            }
+
+            inline fn normalOpModeWait() void {
+                while (true) {
+                    if (regs().STAT.fields().OPERATING_MODE.getEnumValue() == .Normal)
+                        return;
+                    if (regs().STAT.fields().OPERATING_MODE.getEnumValue() == .SelfRefresh and regs().STAT.fields().SELFREF_TYPE.getEnumValue() == .AutoSelfRefresh)
+                        return;
+                }
+            }
+
+            inline fn ddrphyInitWait() bool {
+                while (true) {
+                    if (regs().PGSR.fields().DTERR.getEnumValue() == .Error)
+                        return false;
+                    if (regs().PGSR.fields().DTIERR.getEnumValue() == .Error)
+                        return false;
+                    if (regs().PGSR.fields().DFTERR.getEnumValue() == .Error)
+                        return false;
+                    if (regs().PGSR.fields().RVERR.getEnumValue() == .Error)
+                        return false;
+                    if (regs().PGSR.fields().RVIERR.getEnumValue() == .Error)
+                        return false;
+                    if (regs().PGSR.fields().IDONE.getEnumValue() == .Done)
+                        return true;
+                }
+            }
+
+            inline fn setRegs(comptime reg_values: anytype) void {
+                for (reg_values) |reg_value| {
+                    reg_value.ptr.* = reg_value.value;
+                }
+            }
+            pub const REG_VALUE = struct {
+                ptr: *volatile bus_type,
+                value: bus_type,
+            };
+            pub const REGS_VALUES = struct {
+                ctrl: struct {
+                    reg: []const *const REG_VALUE,
+                    map: []const *const REG_VALUE,
+                    timing: []const *const REG_VALUE,
+                    perf: []const *const REG_VALUE,
+                },
+                phy: struct {
+                    reg: []const *const REG_VALUE,
+                    timing: []const *const REG_VALUE,
+                },
+            };
+            pub fn generateRegValue(reg: port.regs(), value: u32) *const REG_VALUE {
+                return comptime &REG_VALUE{ .ptr = reg.ptr(), .value = value };
+            }
+        },
+
         rcc => enum(bus_type) {
             inline fn resetCycleCounter() void {
                 var value: u32 = undefined;
@@ -489,20 +697,388 @@ fn API(comptime port: anytype) enum_type {
 
 pub const Bus = enum(bus_type) {
     APB5 = 0x5C000000,
+    APB4 = 0x5A000000,
     AHB4 = 0x50000000,
     APB1 = 0x40000000,
 
     pub fn ports(bus: @This()) enum_type {
         return comptime switch (bus) {
+            .APB4 => enum(bus_type) {
+                pub fn api(port: @This()) enum_type {
+                    return API(port);
+                }
+                DDRCTRL = Port(0x3000, bus),
+                DDRPHYC = Port(0x4000, bus),
+                DDR = Port(0xFFFFFF, bus),
+
+                fn regs(port: @This()) enum_type {
+                    const CTRL = bus.ports().DDRCTRL;
+                    const PHY = bus.ports().DDRPHYC;
+                    return comptime switch (port) {
+                        .DDR => enum(bus_type) {
+                            fn ptr(comptime reg: @This()) *volatile u32 {
+                                return @ptrFromInt(@intFromEnum(reg));
+                            }
+                            MSTR = Reg(0x0, CTRL),
+                            STAT = Reg(0x4, CTRL),
+                            MRCTRL0 = Reg(0x10, CTRL),
+                            MRCTRL1 = Reg(0x14, CTRL),
+                            DERATEEN = Reg(0x20, CTRL),
+                            DERATEINT = Reg(0x24, CTRL),
+                            PWRCTL = Reg(0x30, CTRL),
+                            PWRTMG = Reg(0x34, CTRL),
+                            HWLPCTL = Reg(0x38, CTRL),
+                            RFSHCTL0 = Reg(0x50, CTRL),
+                            RFSHCTL3 = Reg(0x60, CTRL),
+                            RFSHTMG = Reg(0x64, CTRL),
+                            CRCPARCTL0 = Reg(0xC0, CTRL),
+                            INIT0 = Reg(0xD0, CTRL),
+                            DRAMTMG0 = Reg(0x100, CTRL),
+                            DRAMTMG1 = Reg(0x104, CTRL),
+                            DRAMTMG2 = Reg(0x108, CTRL),
+                            DRAMTMG3 = Reg(0x10C, CTRL),
+                            DRAMTMG4 = Reg(0x110, CTRL),
+                            DRAMTMG5 = Reg(0x114, CTRL),
+                            DRAMTMG6 = Reg(0x118, CTRL),
+                            DRAMTMG7 = Reg(0x11C, CTRL),
+                            DRAMTMG8 = Reg(0x120, CTRL),
+                            DRAMTMG14 = Reg(0x138, CTRL),
+                            ZQCTL0 = Reg(0x180, CTRL),
+                            DFITMG0 = Reg(0x190, CTRL),
+                            DFITMG1 = Reg(0x194, CTRL),
+                            DFILPCFG0 = Reg(0x198, CTRL),
+                            DFIUPD0 = Reg(0x1A0, CTRL),
+                            DFIUPD1 = Reg(0x1A4, CTRL),
+                            DFIUPD2 = Reg(0x1A8, CTRL),
+                            DFIMISC = Reg(0x1B0, CTRL),
+                            DFIPHYMSTR = Reg(0x1C4, CTRL),
+                            ADDRMAP1 = Reg(0x204, CTRL),
+                            ADDRMAP2 = Reg(0x208, CTRL),
+                            ADDRMAP3 = Reg(0x20C, CTRL),
+                            ADDRMAP4 = Reg(0x210, CTRL),
+                            ADDRMAP5 = Reg(0x214, CTRL),
+                            ADDRMAP6 = Reg(0x218, CTRL),
+                            ADDRMAP9 = Reg(0x224, CTRL),
+                            ADDRMAP10 = Reg(0x228, CTRL),
+                            ADDRMAP11 = Reg(0x22C, CTRL),
+                            ODTCFG = Reg(0x240, CTRL),
+                            ODTMAP = Reg(0x244, CTRL),
+                            SCHED = Reg(0x250, CTRL),
+                            SCHED1 = Reg(0x254, CTRL),
+                            PERFHPR1 = Reg(0x25C, CTRL),
+                            PERFLPR1 = Reg(0x264, CTRL),
+                            PERFWR1 = Reg(0x26C, CTRL),
+                            DBG0 = Reg(0x300, CTRL),
+                            DBG1 = Reg(0x304, CTRL),
+                            DBGCMD = Reg(0x30C, CTRL),
+                            SWCTL = Reg(0x320, CTRL),
+                            SWSTAT = Reg(0x324, CTRL),
+                            POISONCFG = Reg(0x36C, CTRL),
+                            PCCFG = Reg(0x400, CTRL),
+                            PCFGR_0 = Reg(0x404, CTRL),
+                            PCFGW_0 = Reg(0x408, CTRL),
+                            PCTRL_0 = Reg(0x490, CTRL),
+                            PCFGQOS0_0 = Reg(0x494, CTRL),
+                            PCFGQOS1_0 = Reg(0x498, CTRL),
+                            PCFGWQOS0_0 = Reg(0x49C, CTRL),
+                            PCFGWQOS1_0 = Reg(0x4A0, CTRL),
+                            PCFGR_1 = Reg(0x404 + 0xB0, CTRL),
+                            PCFGW_1 = Reg(0x408 + 0xB0, CTRL),
+                            PCTRL_1 = Reg(0x490 + 0xB0, CTRL),
+                            PCFGQOS0_1 = Reg(0x494 + 0xB0, CTRL),
+                            PCFGQOS1_1 = Reg(0x498 + 0xB0, CTRL),
+                            PCFGWQOS0_1 = Reg(0x49C + 0xB0, CTRL),
+                            PCFGWQOS1_1 = Reg(0x4A0 + 0xB0, CTRL),
+
+                            PIR = Reg(0x4, PHY),
+                            PGCR = Reg(0x8, PHY),
+                            PGSR = Reg(0xC, PHY),
+                            PTR0 = Reg(0x18, PHY),
+                            PTR1 = Reg(0x1C, PHY),
+                            PTR2 = Reg(0x20, PHY),
+                            ACIOCR = Reg(0x24, PHY),
+                            DXCCR = Reg(0x28, PHY),
+                            DSGCR = Reg(0x2C, PHY),
+                            DCR = Reg(0x30, PHY),
+                            DTPR0 = Reg(0x34, PHY),
+                            DTPR1 = Reg(0x38, PHY),
+                            DTPR2 = Reg(0x3C, PHY),
+                            MR0 = Reg(0x40, PHY),
+                            MR1 = Reg(0x44, PHY),
+                            MR2 = Reg(0x48, PHY),
+                            MR3 = Reg(0x4C, PHY),
+                            ODTCR = Reg(0x50, PHY),
+                            ZQ0CR1 = Reg(0x184, PHY),
+                            DX0GCR = Reg(0x1C0, PHY),
+                            DX1GCR = Reg(0x200, PHY),
+                            DX2GCR = Reg(0x240, PHY),
+                            DX3GCR = Reg(0x280, PHY),
+                            fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
+                                return comptime switch (reg) {
+                                    .PCTRL_0, .PCTRL_1 => enum {
+                                        const PORT_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
+                                    .PWRTMG => enum {
+                                        const POWERDOWN_TO_X32 = Field{ .rw = .ReadWrite, .width = u5, .shift = 0, .reg = addr, .values = enum {} };
+                                        const SELFREF_TO_X32 = Field{ .rw = .ReadWrite, .width = u8, .shift = 16, .reg = addr, .values = enum {} };
+                                    },
+                                    .HWLPCTL => enum {
+                                        const HW_LP_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
+                                    .PWRCTL => enum {
+                                        const EN_DFI_DRAM_CLK_DISABLE = Field{ .rw = .ReadWrite, .width = u1, .shift = 3, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const POWERDOWN_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const SELFREF_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
+                                    .RFSHCTL3 => enum {
+                                        const DIS_AUTO_REFRESH = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                    },
+                                    .STAT => enum {
+                                        const OPERATING_MODE = Field{ .rw = .ReadOnly, .width = u3, .shift = 0, .reg = addr, .values = enum(u3) {
+                                            Init = 0,
+                                            Normal = 1,
+                                            PowerDown = 2,
+                                            SelfRefresh = 3,
+                                        } };
+                                        const SELFREF_TYPE = Field{ .rw = .ReadOnly, .width = u2, .shift = 4, .reg = addr, .values = enum(u2) {
+                                            NonSelfRefresh = 0,
+                                            PhySelfRefresh = 1,
+                                            SelfRefresh = 2,
+                                            AutoSelfRefresh = 3,
+                                        } };
+                                    },
+                                    .SWSTAT => enum {
+                                        const SW_DONE_ACK = Field{ .rw = .ReadOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            InProgress = 0,
+                                            Done = 1,
+                                        } };
+                                    },
+                                    .SWCTL => enum {
+                                        const SW_DONE = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Enable = 0,
+                                            Disable = 1,
+                                        } };
+                                    },
+                                    .MSTR => enum {
+                                        const DDR3 = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            NonDDR3 = 0,
+                                            DDR3 = 1,
+                                        } };
+                                    },
+                                    .PIR => enum {
+                                        const ICPC = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            PhyOnly = 0,
+                                            PhyAndPubl = 1,
+                                        } };
+                                        const RVTRN = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const QSTRN = Field{ .rw = .WriteOnly, .width = u1, .shift = 7, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DRAMINIT = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DRAMRST = Field{ .rw = .WriteOnly, .width = u1, .shift = 5, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const ITMSRST = Field{ .rw = .WriteOnly, .width = u1, .shift = 4, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const ZCAL = Field{ .rw = .WriteOnly, .width = u1, .shift = 3, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DLLLOCK = Field{ .rw = .WriteOnly, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DLLSRST = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const INIT = Field{ .rw = .WriteOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                    },
+                                    .PGSR => enum {
+                                        const IDONE = Field{ .rw = .ReadOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            NotReady = 0,
+                                            Done = 1,
+                                        } };
+                                        const DTERR = Field{ .rw = .ReadOnly, .width = u1, .shift = 5, .reg = addr, .values = enum(u1) {
+                                            Ok = 0,
+                                            Error = 1,
+                                        } };
+                                        const DTIERR = Field{ .rw = .ReadOnly, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
+                                            Ok = 0,
+                                            Error = 1,
+                                        } };
+                                        const DFTERR = Field{ .rw = .ReadOnly, .width = u1, .shift = 7, .reg = addr, .values = enum(u1) {
+                                            Ok = 0,
+                                            Error = 1,
+                                        } };
+                                        const RVERR = Field{ .rw = .ReadOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
+                                            Ok = 0,
+                                            Error = 1,
+                                        } };
+                                        const RVIERR = Field{ .rw = .ReadOnly, .width = u1, .shift = 9, .reg = addr, .values = enum(u1) {
+                                            Ok = 0,
+                                            Error = 1,
+                                        } };
+                                    },
+                                    .INIT0 => enum {
+                                        const SKIP_DRAM_INIT = Field{ .rw = .ReadWrite, .width = u2, .shift = 30, .reg = addr, .values = enum(u2) {
+                                            InitAfterPowerUp = 0,
+                                            InitSkippedNormal = 1,
+                                            InitSkippedSelfRefresh = 3,
+                                        } };
+                                    },
+                                    .DFIMISC => enum {
+                                        const DFI_INIT_COMPLETE_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                    },
+                                    else => unreachable,
+                                };
+                            }
+                        },
+                        else => unreachable,
+                    };
+                }
+            },
             .APB5 => enum(bus_type) {
                 pub fn api(port: @This()) enum_type {
                     return API(port);
                 }
 
                 RTC = Port(0x4000, bus),
+                TZC = Port(0x6000, bus),
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
                         .RTC => enum(bus_type) {},
+                        .TZC => enum(bus_type) {
+                            GATE_KEEPER = Reg(0x8, port),
+                            SPECULATION_CTRL = Reg(0xC, port),
+                            ID_ACCESS0 = Reg(0x114, port),
+                            ID_ACCESS1 = Reg(0x114 + 0x20, port),
+                            ID_ACCESS2 = Reg(0x114 + 0x20 * 2, port),
+                            ID_ACCESS3 = Reg(0x114 + 0x20 * 3, port),
+                            ID_ACCESS4 = Reg(0x114 + 0x20 * 4, port),
+                            ID_ACCESS5 = Reg(0x114 + 0x20 * 5, port),
+                            ID_ACCESS6 = Reg(0x114 + 0x20 * 6, port),
+                            ID_ACCESS7 = Reg(0x114 + 0x20 * 7, port),
+                            ID_ACCESS8 = Reg(0x114 + 0x20 * 8, port),
+                            ATTRIBUTE0 = Reg(0x110, port),
+                            ATTRIBUTE1 = Reg(0x130, port),
+                            ATTRIBUTE2 = Reg(0x130 + 0x20, port),
+                            ATTRIBUTE3 = Reg(0x130 + 0x20 * 2, port),
+                            ATTRIBUTE4 = Reg(0x130 + 0x20 * 3, port),
+                            ATTRIBUTE5 = Reg(0x130 + 0x20 * 4, port),
+                            ATTRIBUTE6 = Reg(0x130 + 0x20 * 5, port),
+                            ATTRIBUTE7 = Reg(0x130 + 0x20 * 6, port),
+                            ATTRIBUTE8 = Reg(0x130 + 0x20 * 7, port),
+
+                            fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
+                                return comptime switch (reg) {
+                                    .ATTRIBUTE1, .ATTRIBUTE2, .ATTRIBUTE3, .ATTRIBUTE4, .ATTRIBUTE5, .ATTRIBUTE6, .ATTRIBUTE7, .ATTRIBUTE8 => enum {
+                                        const S_WR_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotAllowed = 0,
+                                            Permitted = 1,
+                                        } };
+                                        const S_RD_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 30, .reg = addr, .values = enum(u1) {
+                                            NotAllowed = 0,
+                                            Permitted = 1,
+                                        } };
+                                        const FILTER0_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const FILTER1_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
+                                    .ATTRIBUTE0 => enum {
+                                        const S_WR_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
+                                            NotAllowed = 0,
+                                            Permitted = 1,
+                                        } };
+                                        const S_RD_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 30, .reg = addr, .values = enum(u1) {
+                                            NotAllowed = 0,
+                                            Permitted = 1,
+                                        } };
+                                        const FILTER0_EN = Field{ .rw = .ReadOnly, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const FILTER1_EN = Field{ .rw = .ReadOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
+                                    .ID_ACCESS0, .ID_ACCESS1, .ID_ACCESS2, .ID_ACCESS3, .ID_ACCESS4, .ID_ACCESS5, .ID_ACCESS6, .ID_ACCESS7, .ID_ACCESS8 => enum {
+                                        const NSAID_WR_EN = Field{ .rw = .ReadWrite, .width = u16, .shift = 16, .reg = addr, .values = enum {} };
+                                        const NSAID_RD_EN = Field{ .rw = .ReadWrite, .width = u16, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .SPECULATION_CTRL => enum {
+                                        const WRITESPEC_DISABLE = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const READSPEC_DISABLE = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                    },
+                                    .GATE_KEEPER => enum {
+                                        const OPENSTAT_FLT0 = Field{ .rw = .ReadOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            Opened = 0,
+                                            Closed = 1,
+                                        } };
+                                        const OPENSTAT_FLT1 = Field{ .rw = .ReadOnly, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Opened = 0,
+                                            Closed = 1,
+                                        } };
+                                        const OPENREQ_FLT0 = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Opened = 0,
+                                            Closed = 1,
+                                        } };
+                                        const OPENREQ_FLT1 = Field{ .rw = .ReadWrite, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Opened = 0,
+                                            Closed = 1,
+                                        } };
+                                    },
+                                };
+                            }
+                        },
                     };
                 }
             },
@@ -652,9 +1228,91 @@ pub const Bus = enum(bus_type) {
                             AXIDIVR = Reg(0x30, port), // RCC AXI clock divider register (RCC_AXIDIVR)
                             APB4DIVR = Reg(0x3C, port), // RCC APB4 clock divider register (RCC_APB4DIVR)
                             APB5DIVR = Reg(0x40, port), // RCC APB5 clock divider register (RCC_APB5DIVR)
+                            DDRITFCR = Reg(0xD8, port), // RCC DDR interface control register (RCC_DDRITFCR)
+                            MP_APB5ENSETR = Reg(0x208, port), // RCC APB5 peripheral enable for MPU set register
+                            MP_APB5ENCLRR = Reg(0x20C, port), // RCC APB5 peripheral enable for MPU clear register
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .MP_APB5ENSETR => enum {
+                                        const TZC1EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 11, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const TZC2EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 12, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const TZPCEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 13, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                    },
+                                    .MP_APB5ENCLRR => enum {
+                                        const TZC1EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 11, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                        const TZC2EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 12, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                        const TZPCEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 13, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                    },
+                                    .DDRITFCR => enum {
+                                        const DDRCKMOD = Field{ .rw = .ReadWrite, .width = u3, .shift = 20, .reg = addr, .values = enum(u3) {
+                                            Normal = 0,
+                                            AutoSelfRef = 1,
+                                            HardwareSelfRef = 2,
+                                            FullAutoSelfRef = 5,
+                                            FullHardwareSelfRef = 6,
+                                        } };
+                                        const DPHYCTLRST = Field{ .rw = .ReadWrite, .width = u1, .shift = 19, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DPHYRST = Field{ .rw = .ReadWrite, .width = u1, .shift = 18, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DPHYAPBRST = Field{ .rw = .ReadWrite, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DDRCORERST = Field{ .rw = .ReadWrite, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DDRCAXIRST = Field{ .rw = .ReadWrite, .width = u1, .shift = 15, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DDRCAPBRST = Field{ .rw = .ReadWrite, .width = u1, .shift = 14, .reg = addr, .values = enum(u1) {
+                                            Cleared = 0,
+                                            Asserted = 1,
+                                        } };
+                                        const DDRPHYCAPBEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 9, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const AXIDCGEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DDRCAPBEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DDRPHYCEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 4, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DDRC2EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DDRC1EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 0, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                    },
                                     .APB5DIVR => enum {
                                         const APB5DIVRDY = Field{ .rw = .ReadOnly, .width = u1, .shift = 31, .reg = addr, .values = enum(u1) {
                                             NotReady = 0,
