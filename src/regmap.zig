@@ -569,6 +569,13 @@ fn API(comptime port: anytype) enum_type {
         },
 
         gpioa, gpiob, gpiog => enum(bus_type) {
+            pub fn enableGPIOclocks() void {
+                port.api().CLOCKS.enable();
+            }
+
+            pub fn disableGPIOclocks() void {
+                port.api().CLOCKS.disable();
+            }
             pub fn pin(comptime PIN: u4) enum_type {
                 return comptime enum {
                     pub const MODE = enum(u2) { Input = 0, Output = 1, AltFunc = 2, Analog = 3 };

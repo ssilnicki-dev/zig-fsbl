@@ -8,6 +8,8 @@ const LED = Mem.Bus.AHB4.ports().GPIOA.api().pin(13);
 const DDR = @import("regmap.zig").Bus.APB4.ports().DDR.api();
 const TZC = Mem.Bus.APB5.ports().TZC.api();
 
+const GPIOB = Mem.Bus.AHB4.ports().GPIOB.api();
+const GPIOG = Mem.Bus.AHB4.ports().GPIOG.api();
 export fn main() u8 {
     // RCC init
     RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
@@ -28,12 +30,10 @@ export fn main() u8 {
     TZC.initSecureDDRAccess();
     _ = DDR.init(ddr_regs_values);
     // UART pins SoC dependant
-    const uart_rx_pin = Mem.Bus.AHB4.ports().GPIOB.api().pin(2);
-    const uart_tx_pin = Mem.Bus.AHB4.ports().GPIOG.api().pin(11);
-    uart_rx_pin.enableGPIOclocks();
-    uart_tx_pin.enableGPIOclocks();
-    uart_rx_pin.configure(uart_rx_pin.MODE.AltFunc, uart_rx_pin.OTYPE.PushPull, uart_rx_pin.OSPEED.High, uart_rx_pin.PUPD.PullUp, 8);
-    uart_tx_pin.configure(uart_tx_pin.MODE.AltFunc, uart_tx_pin.OTYPE.PushPull, uart_tx_pin.OSPEED.High, uart_tx_pin.PUPD.PullUp, 6);
+    GPIOB.enableGPIOclocks();
+    GPIOG.enableGPIOclocks();
+    GPIOB.pin(2).configure(.AltFunc, .PushPull, .High, .PullUp, 8);
+    GPIOG.pin(11).configure(.AltFunc, .PushPull, .High, .PullUp, 6);
     console.init();
 
     // LED
