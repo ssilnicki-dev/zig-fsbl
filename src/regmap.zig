@@ -5,21 +5,28 @@ const enum_type: type = @TypeOf(enum {});
 const HSI_FRIQUENCY = 64000000;
 const HSE_FRIQUENCY = 24000000; // SoM dependant
 var system_clock_hz: u32 = HSI_FRIQUENCY;
-var cycle_counter_enabled: bool = false;
+
+fn Flag(comptime shift: Field.shift_type, comptime rw: Field.rw_type, comptime reg: bus_type) Field {
+    const FlagEnumValues = enum(u1) {
+        Cleared = 0,
+        Asserted = 1,
+    };
+    return Field{ .rw = rw, .width = u1, .shift = shift, .reg = reg, .values = FlagEnumValues };
+}
 
 const Field = struct {
     pub const shift_type = switch (bus_type) {
         u32 => u5,
-        u64 => u6,
-        else => unreachable, // >64bit arch??? not so fast....
+        else => unreachable,
     };
-    reg: bus_type,
-    width: type,
-    rw: enum {
+    pub const rw_type = enum {
         ReadOnly,
         WriteOnly,
         ReadWrite,
-    },
+    };
+    reg: bus_type,
+    width: type,
+    rw: rw_type,
     shift: shift_type,
     values: enum_type,
 
@@ -77,6 +84,22 @@ const Field = struct {
         comptime if (@typeInfo(self.values).Enum.fields.len > 0 or self.rw == .ReadOnly)
             unreachable;
         self.setValueImpl(value);
+    }
+
+    fn setBit(comptime self: Field, comptime bit: shift_type) void {
+        comptime if (@bitSizeOf(self.width) < (@as(bus_type, bit) + 1))
+            unreachable;
+        var field_value: self.width = @intCast(self.getIntValue());
+        field_value |= @as(self.width, 1) << bit;
+        self.setValueImpl(field_value);
+    }
+
+    fn clearBit(comptime self: Field, comptime bit: shift_type) void {
+        comptime if (@bitSizeOf(self.width) < (@as(bus_type, bit) + 1))
+            unreachable;
+        var field_value: self.width = @intCast(self.getIntValue());
+        field_value &= ~(@as(self.width, 1) << bit);
+        self.setValueImpl(field_value);
     }
 
     pub fn getIntValue(comptime self: Field) bus_type {
@@ -307,11 +330,10 @@ fn API(comptime port: anytype) enum_type {
                     timing: []const *const REG_VALUE,
                 },
             };
-            pub fn generateRegValue(reg: port.regs(), value: u32) *const REG_VALUE {
+            pub fn generateRegValue(reg: port.regs(), value: bus_type) *const REG_VALUE {
                 return comptime &REG_VALUE{ .ptr = reg.ptr(), .value = value };
             }
         },
-
         rcc => enum(bus_type) {
             inline fn resetCycleCounter() void {
                 var value: u32 = undefined;
@@ -327,22 +349,6 @@ fn API(comptime port: anytype) enum_type {
                     : "memory"
                 ); // write modified
             }
-            inline fn readCycleCounter() u32 {
-                var value: u32 = undefined;
-                asm volatile (
-                    \\ mrc p15, 0, %[value], c9, c13, 0
-                    : [value] "=r" (value),
-                );
-                return value;
-            }
-            pub fn udelay(usec: u32) void {
-                if (!cycle_counter_enabled)
-                    enableCycleCounter();
-                resetCycleCounter();
-                const delay = getSystemClockHz() / 1_000_000 * usec;
-                while (readCycleCounter() < delay) {}
-            }
-
             inline fn enableCycleCounter() void {
                 var value: u32 = undefined;
                 asm volatile (
@@ -356,8 +362,22 @@ fn API(comptime port: anytype) enum_type {
                     : [reg] "r" (value),
                     : "memory"
                 );
-                cycle_counter_enabled = true;
             }
+            inline fn readCycleCounter() u32 {
+                var value: u32 = undefined;
+                asm volatile (
+                    \\ mrc p15, 0, %[value], c9, c13, 0
+                    : [value] "=r" (value),
+                );
+                return value;
+            }
+            pub fn udelay(usec: u32) void {
+                resetCycleCounter();
+                enableCycleCounter();
+                const delay = getSystemClockHz() / 1_000_000 * usec;
+                while (readCycleCounter() < delay) {}
+            }
+
             pub const EXT_CLOCK_MODE = enum { Crystal };
             pub const LSE = struct {
                 pub fn init(comptime mode: EXT_CLOCK_MODE) void { // RM0436 Rev 6, p.531
@@ -557,7 +577,6 @@ fn API(comptime port: anytype) enum_type {
                 }
             };
         },
-
         pwr => enum(bus_type) {
             const DBP = port.regs().CR1.fields().DBP;
             pub fn disableBackupDomainWriteProtection() void {
@@ -637,7 +656,6 @@ fn API(comptime port: anytype) enum_type {
                 }
             };
         },
-
         uart4 => enum(bus_type) {
             pub fn init() void {
                 // TODO: parametrise as per baud rate, parity, bits, stop bits, clock source, etc.
@@ -723,7 +741,7 @@ pub const Bus = enum(bus_type) {
                     const PHY = bus.ports().DDRPHYC;
                     return comptime switch (port) {
                         .DDR => enum(bus_type) {
-                            fn ptr(comptime reg: @This()) *volatile u32 {
+                            fn ptr(comptime reg: @This()) *volatile bus_type {
                                 return @ptrFromInt(@intFromEnum(reg));
                             }
                             MSTR = Reg(0x0, CTRL),
