@@ -70,7 +70,6 @@ export fn main() u8 {
     PLL.PLL4.enableOutput(.P); // for SDMMC MUXer
     MUX.SDMMC12.setSource(MUX.source(.SDMMC12).PLL4);
 
-    SECONDARY_CPU.start(@intFromPtr(&_start_co));
     const emmc2_card_type = SDMMC2.getMediaType(200_000_000);
     if (emmc2_card_type != .NoMedia) {
         LED.reset();
@@ -80,6 +79,7 @@ export fn main() u8 {
         LED.set();
     }
 
+    // SECONDARY_CPU.start(@intFromPtr(&_start_co));
     return 0;
 }
 
