@@ -10,6 +10,9 @@ const TZC = Mem.Bus.APB5.ports().TZC.api();
 
 const GPIOB = Mem.Bus.AHB4.ports().GPIOB.api();
 const GPIOG = Mem.Bus.AHB4.ports().GPIOG.api();
+const SECONDARY_CPU = Mem.Bus.API.ports().SECONDARY_CPU.api();
+extern fn _start_co() void;
+
 export fn main() u8 {
     // RCC init
     RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
@@ -40,8 +43,15 @@ export fn main() u8 {
     LED.configure(LED.MODE.Output, LED.OTYPE.OpenDrain, LED.OSPEED.High, LED.PUPD.Disabled, 0);
     LED.reset();
 
-    _ = console.write("Hello, world!\r\n");
+    SECONDARY_CPU.start(@intFromPtr(&_start_co));
+    return 0;
+}
 
+export fn main_co() u8 {
+    while (true) {
+        _ = console.write("Hello, world!\r\n");
+        RCC.udelay(500000);
+    }
     return 0;
 }
 

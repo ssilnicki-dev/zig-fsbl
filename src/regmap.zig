@@ -125,6 +125,8 @@ fn API(comptime port: anytype) enum_type {
     const uart4 = @intFromEnum(Bus.APB1.ports().UART4);
     const ddr = @intFromEnum(Bus.APB4.ports().DDR);
     const tzc = @intFromEnum(Bus.APB5.ports().TZC);
+    const secondary_cpu = @intFromEnum(Bus.API.ports().SECONDARY_CPU);
+    const gic = @intFromEnum(Bus.API.ports().GIC);
 
     const current_port = @intFromEnum(port);
 
@@ -716,18 +718,140 @@ fn API(comptime port: anytype) enum_type {
                 return bytes.len;
             }
         },
+        secondary_cpu => enum(bus_type) {
+            pub fn start(proc_addr: bus_type) void {
+                const RTCAPBSET = Bus.AHB4.ports().RCC.regs().MP_APB5ENSETR.fields().RTCAPBEN;
+                const RTCAPBCLR = Bus.AHB4.ports().RCC.regs().MP_APB5ENCLRR.fields().RTCAPBEN;
+                const BOOT_API_CORE1_BRANCH_ADDRESS = Bus.APB5.ports().TAMP.regs().BOOT_API_CORE1_BRANCH_ADDRESS.fields().VALUE;
+                const BOOT_API_CORE1_MAGIC_NUMBER = Bus.APB5.ports().TAMP.regs().BOOT_API_CORE1_MAGIC_NUMBER.fields().VALUE;
+                const PWR = Bus.AHB4.ports().PWR.api();
+                const GIC = Bus.API.ports().GIC.api();
+                const rtc_enabled = RTCAPBSET.getEnumValue();
+                if (rtc_enabled == .NotSet)
+                    RTCAPBSET.setEnumValue(.Set);
+
+                PWR.disableBackupDomainWriteProtection();
+                BOOT_API_CORE1_MAGIC_NUMBER.set(0xCA7FACE1);
+                BOOT_API_CORE1_BRANCH_ADDRESS.set(proc_addr);
+                PWR.enableBackupDomainWriteProtection();
+
+                if (rtc_enabled == .NotSet)
+                    RTCAPBCLR.setEnumValue(.Clear);
+
+                GIC.enableSGI(8, .Core1);
+                GIC.generateSGI(8, .Core1);
+            }
+        },
+        gic => enum(bus_type) {
+            const GICD = Bus.CA7i.ports().GICD.regs();
+            const CPU_SELECTION = enum(u2) {
+                Core0 = 1,
+                Core1 = 2,
+                Both = 3,
+            };
+            fn enableSGI(comptime intid: u4, comptime cpus: CPU_SELECTION) void {
+                if (intid > 7) {
+                    GICD.CTLR.fields().ENABLEGRP0.setEnumValue(.Asserted);
+                } else {
+                    GICD.CTLR.fields().ENABLEGRP1.setEnumValue(.Asserted);
+                }
+                GICD.ISENABLER.fields().VALUE.setBit(intid);
+                const target_ptr: *volatile bus_type = @ptrFromInt(@intFromEnum(GICD.ITARGETSR) + (intid >> 2) * 0x4);
+                const target_value = @as(bus_type, @intFromEnum(cpus)) << (0x8 * (intid & 0x3));
+                target_ptr.* = target_value;
+            }
+
+            fn generateSGI(comptime intid: u4, comptime cpus: CPU_SELECTION) void {
+                const SGIR = GICD.SGIR.fields();
+                const sgi_ptr = @as(*volatile bus_type, @ptrFromInt(@intFromEnum(GICD.SGIR)));
+                var sgi_reset_value = sgi_ptr.*;
+                sgi_reset_value &= SGIR.CPUTARGETLIST.getResetMask();
+                sgi_reset_value &= SGIR.NSATT.getResetMask();
+                sgi_reset_value &= SGIR.SGIINTID.getResetMask();
+                sgi_reset_value &= SGIR.TARGETLISTFILTER.getResetMask();
+                sgi_ptr.* = sgi_reset_value;
+
+                if (intid > 7) {
+                    SGIR.NSATT.setEnumValue(.SecureOnly);
+                } else {
+                    SGIR.NSATT.setEnumValue(.NonSecureOnly);
+                }
+                SGIR.TARGETLISTFILTER.setEnumValue(.TargetList);
+                SGIR.SGIINTID.set(intid);
+                SGIR.CPUTARGETLIST.setEnumValue(cpus);
+            }
+        },
         else => unreachable,
     };
 }
 
 pub const Bus = enum(bus_type) {
+    API = 0x0,
     APB5 = 0x5C000000,
     APB4 = 0x5A000000,
     AHB4 = 0x50000000,
     APB1 = 0x40000000,
+    CA7i = 0xA0000000,
 
     pub fn ports(bus: @This()) enum_type {
         return comptime switch (bus) {
+            .API => enum(bus_type) {
+                SECONDARY_CPU = Port(0x0, bus),
+                GIC = Port(0x1, bus),
+                pub fn api(port: @This()) enum_type {
+                    return API(port);
+                }
+            },
+            .CA7i => enum(bus_type) {
+                pub fn api(port: @This()) enum_type {
+                    return API(port);
+                }
+                GICD = Port(0x21000, bus),
+                fn regs(port: @This()) enum_type {
+                    return comptime switch (port) {
+                        .GICD => enum(bus_type) {
+                            CTLR = Reg(0x0, port),
+                            TYPER = Reg(0x4, port),
+                            IGROUPR = Reg(0x80, port),
+                            ISENABLER = Reg(0x100, port),
+                            ITARGETSR = Reg(0x820, port),
+                            SGIR = Reg(0xF00, port),
+                            fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
+                                return comptime switch (reg) {
+                                    .CTLR => enum {
+                                        const ENABLEGRP0 = Flag(0, .ReadWrite, addr);
+                                        const ENABLEGRP1 = Flag(1, .ReadWrite, addr);
+                                    },
+                                    .TYPER => enum {
+                                        const ITLINESNUMBER = Field{ .rw = .ReadWrite, .width = u5, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .SGIR => enum {
+                                        const SGIINTID = Field{ .rw = .ReadWrite, .width = u4, .shift = 0, .reg = addr, .values = enum {} };
+                                        const NSATT = Field{ .rw = .ReadWrite, .width = u1, .shift = 15, .reg = addr, .values = enum(u1) {
+                                            SecureOnly = 0,
+                                            NonSecureOnly = 1,
+                                        } };
+                                        const CPUTARGETLIST = Field{ .rw = .ReadWrite, .width = u2, .shift = 16, .reg = addr, .values = Bus.API.ports().GIC.api().CPU_SELECTION };
+                                        const TARGETLISTFILTER = Field{ .rw = .ReadWrite, .width = u2, .shift = 24, .reg = addr, .values = enum(u2) {
+                                            TargetList = 0,
+                                            AllExceptRequesting = 1,
+                                            Requesting = 2,
+                                        } };
+                                    },
+                                    .IGROUPR => enum {
+                                        const VALUE = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .ISENABLER => enum {
+                                        const VALUE = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    else => enum {},
+                                };
+                            }
+                        },
+                    };
+                }
+            },
             .APB4 => enum(bus_type) {
                 pub fn api(port: @This()) enum_type {
                     return API(port);
@@ -1003,10 +1127,26 @@ pub const Bus = enum(bus_type) {
                     return API(port);
                 }
 
+                TAMP = Port(0xA000, bus),
                 RTC = Port(0x4000, bus),
                 TZC = Port(0x6000, bus),
                 fn regs(port: @This()) enum_type {
                     return comptime switch (port) {
+                        .TAMP => enum(bus_type) {
+                            BOOT_API_CORE1_MAGIC_NUMBER = Reg(0x110, port),
+                            BOOT_API_CORE1_BRANCH_ADDRESS = Reg(0x114, port),
+                            fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
+                                return comptime switch (reg) {
+                                    .BOOT_API_CORE1_MAGIC_NUMBER => enum {
+                                        const VALUE = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .BOOT_API_CORE1_BRANCH_ADDRESS => enum {
+                                        const VALUE = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                };
+                            }
+                        },
                         .RTC => enum(bus_type) {},
                         .TZC => enum(bus_type) {
                             GATE_KEEPER = Reg(0x8, port),
@@ -1260,6 +1400,10 @@ pub const Bus = enum(bus_type) {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
                                     .MP_APB5ENSETR => enum {
+                                        const RTCAPBEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
+                                            NotSet = 0,
+                                            Set = 1,
+                                        } };
                                         const TZC1EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 11, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
@@ -1271,6 +1415,9 @@ pub const Bus = enum(bus_type) {
                                         } };
                                     },
                                     .MP_APB5ENCLRR => enum {
+                                        const RTCAPBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
                                         const TZC1EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 11, .reg = addr, .values = enum(u1) {
                                             Clear = 1,
                                         } };

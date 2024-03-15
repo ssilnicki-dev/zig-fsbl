@@ -1,10 +1,22 @@
 .section .text
 .global _start
+.global _start_co
+
 
 _start:
-    // Initialize stack pointer
     ldr sp, =0x30000000
+    bl _init
+    bl main
+    b .
 
+.align 8
+_start_co:
+    ldr sp, =0xe0000000 // at this moment DDR has to be already configured
+    bl _init
+    bl main_co
+    b .
+
+_init:
     // enable C10-C11 coprocessors - VFP&NEON
     ldr r1, =0xF00000
     mcr p15, 0, r1, c1, c0, 2
@@ -17,12 +29,9 @@ _start:
     ldr r0, =0x40000000
     vmsr FPEXC, r0
 
-    // Call main function
-    bl main
+    bx lr
 
-    // If main returns, enter an infinite loop
-    b .
-
+.align 8
 .section .bss
     // Define a block of uninitialized data (BSS section)
     // .lcomm stack, 4096
