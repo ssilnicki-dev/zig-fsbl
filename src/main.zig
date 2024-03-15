@@ -25,16 +25,16 @@ export fn main() u8 {
     RCC.HSE.init(RCC.EXT_CLOCK_MODE.Crystal);
 
     // MPU clock source
-    MUX.PLL12.setSource(MUX.source(MUX.PLL12).HSE); // Prepare MPU clock source
+    MUX.PLL12.setSource(MUX.source(.PLL12).HSE); // Prepare MPU clock source
     PLL.PLL1.setDividers(2, 80, 2048, 0, 1, 1); // -> 650 MHz on DIVP PLL1 port
-    PLL.PLL1.enableOutput(PLL.OUTPUT.P); // Enable MPU source clock output
-    MUX.MPU.setSource(MUX.source(MUX.MPU).PLL1); // Switch to new MPU clock source
+    PLL.PLL1.enableOutput(.P); // Enable MPU source clock output
+    MUX.MPU.setSource(MUX.source(.MPU).PLL1); // Switch to new MPU clock source
 
     // AXI, DDR
     PLL.PLL2.setDividers(2, 65, 5120, 1, 0, 0); // -> 533 MHz on DIVR PPL2 port
-    PLL.PLL2.enableOutput(PLL.OUTPUT.R); // Enable DDR source clock output
-    PLL.PLL2.enableOutput(PLL.OUTPUT.P); // Enable AXI source clock output
-    MUX.AXI.setSource(MUX.source(MUX.AXI).PLL2); // Switch to new AXI clock source
+    PLL.PLL2.enableOutput(.R); // Enable DDR source clock output
+    PLL.PLL2.enableOutput(.P); // Enable AXI source clock output
+    MUX.AXI.setSource(MUX.source(.AXI).PLL2); // Switch to new AXI clock source
     RCC.AXI.setDividers(0, 1, 2); // see actual div. values RM0436 Rev 6 pp.662-665
     TZC.initSecureDDRAccess();
     _ = DDR.init(ddr_regs_values);
@@ -43,7 +43,7 @@ export fn main() u8 {
     GPIOB.pin(2).configure(.AltFunc, .PushPull, .High, .PullUp, 8);
     GPIOG.pin(11).configure(.AltFunc, .PushPull, .High, .PullUp, 6);
     console.init();
-    LED.configure(LED.MODE.Output, LED.OTYPE.OpenDrain, LED.OSPEED.High, LED.PUPD.Disabled, 0);
+    LED.configure(.Output, .OpenDrain, .High, .Disabled, 0);
 
     // SDMMC2 - eMMC
     GPIOB.pin(14).configure(.AltFunc, .PushPull, .Medium, .Disabled, 9); // D0
