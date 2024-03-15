@@ -119,12 +119,17 @@ const Field = struct {
 fn API(comptime port: anytype) enum_type {
     const gpioa = @intFromEnum(Bus.AHB4.ports().GPIOA);
     const gpiob = @intFromEnum(Bus.AHB4.ports().GPIOB);
+    const gpioc = @intFromEnum(Bus.AHB4.ports().GPIOC);
+    const gpiod = @intFromEnum(Bus.AHB4.ports().GPIOD);
+    const gpioe = @intFromEnum(Bus.AHB4.ports().GPIOE);
     const gpiog = @intFromEnum(Bus.AHB4.ports().GPIOG);
     const rcc = @intFromEnum(Bus.AHB4.ports().RCC);
     const pwr = @intFromEnum(Bus.AHB4.ports().PWR);
     const uart4 = @intFromEnum(Bus.APB1.ports().UART4);
     const ddr = @intFromEnum(Bus.APB4.ports().DDR);
     const tzc = @intFromEnum(Bus.APB5.ports().TZC);
+    const sdmmc1 = @intFromEnum(Bus.AHB6.ports().SDMMC1);
+    const sdmmc2 = @intFromEnum(Bus.AHB6.ports().SDMMC2);
     const secondary_cpu = @intFromEnum(Bus.API.ports().SECONDARY_CPU);
     const gic = @intFromEnum(Bus.API.ports().GIC);
 
@@ -437,6 +442,7 @@ fn API(comptime port: anytype) enum_type {
                 MPU,
                 AXI,
                 MCU,
+                SDMMC12,
                 pub fn source(comptime mux: MUX) enum_type {
                     return comptime switch (mux) {
                         .PLL12 => enum(u2) { HSI = 0, HSE = 1, Off },
@@ -445,6 +451,7 @@ fn API(comptime port: anytype) enum_type {
                         .MPU => enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 },
                         .AXI => enum(u2) { HSI = 0, HSE = 1, PLL2 = 2 },
                         .MCU => enum(u2) { HSI = 0, HSE = 1, CSI = 2, PLL3 = 3 },
+                        .SDMMC12 => enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off },
                     };
                 }
                 pub fn setSource(comptime self: MUX, comptime src: anytype) void {
@@ -455,17 +462,25 @@ fn API(comptime port: anytype) enum_type {
                         .MPU => port.regs().MPCKSELR.fields().MPUSRC,
                         .AXI => port.regs().ASSCKSELR.fields().AXISSRC,
                         .MCU => port.regs().MSSCKSELR.fields().MCUSSRC,
-                    };
-                    const RDY = comptime switch (self) {
-                        .PLL12 => port.regs().RCK12SELR.fields().PLL12SRCRDY,
-                        .PLL3 => port.regs().RCK3SELR.fields().PLL3SRCRDY,
-                        .PLL4 => port.regs().RCK4SELR.fields().PLL4SRCRDY,
-                        .MPU => port.regs().MPCKSELR.fields().MPUSRCRDY,
-                        .AXI => port.regs().ASSCKSELR.fields().AXISSRCRDY,
-                        .MCU => port.regs().MSSCKSELR.fields().MCUSSRCRDY,
+                        .SDMMC12 => port.regs().SDMMC12CKSELR.fields().SDMMC12SRC,
                     };
                     SRC.set(src);
-                    while (RDY.getEnumValue() != RDY.values.Ready) {}
+
+                    switch (self) {
+                        .PLL12, .PLL3, .PLL4, .MPU, .AXI, .MCU => {
+                            const RDY = comptime switch (self) {
+                                .PLL12 => port.regs().RCK12SELR.fields().PLL12SRCRDY,
+                                .PLL3 => port.regs().RCK3SELR.fields().PLL3SRCRDY,
+                                .PLL4 => port.regs().RCK4SELR.fields().PLL4SRCRDY,
+                                .MPU => port.regs().MPCKSELR.fields().MPUSRCRDY,
+                                .AXI => port.regs().ASSCKSELR.fields().AXISSRCRDY,
+                                .MCU => port.regs().MSSCKSELR.fields().MCUSSRCRDY,
+                                else => unreachable,
+                            };
+                            while (RDY.getEnumValue() != RDY.values.Ready) {}
+                        },
+                        else => {},
+                    }
 
                     switch (self) {
                         .PLL12, .MPU => {
@@ -588,15 +603,7 @@ fn API(comptime port: anytype) enum_type {
                 DBP.set(DBP.values.Disabled);
             }
         },
-
-        gpioa, gpiob, gpiog => enum(bus_type) {
-            pub fn enableGPIOclocks() void {
-                port.api().CLOCKS.enable();
-            }
-
-            pub fn disableGPIOclocks() void {
-                port.api().CLOCKS.disable();
-            }
+        gpioa, gpiob, gpioc, gpiod, gpioe, gpiog => enum(bus_type) {
             pub fn pin(comptime PIN: u4) enum_type {
                 return comptime enum {
                     pub const MODE = enum(u2) { Input = 0, Output = 1, AltFunc = 2, Analog = 3 };
@@ -604,6 +611,8 @@ fn API(comptime port: anytype) enum_type {
                     pub const OSPEED = enum(u2) { Low = 0, Medium = 1, High = 2, VeryHigh = 3 };
                     pub const PUPD = enum(u2) { Disabled = 0, PullUp = 1, PullDown = 2, Reserved = 3 };
                     pub fn configure(comptime mode: MODE, comptime otype: OTYPE, comptime ospeed: OSPEED, comptime pupd: PUPD, comptime af: u4) void {
+                        if (mode == .AltFunc)
+                            enableGPIOclocks();
                         MODER.set(mode);
                         OTYPER.set(otype);
                         OSPEEDR.set(ospeed);
@@ -617,6 +626,12 @@ fn API(comptime port: anytype) enum_type {
                     pub fn reset() void {
                         BRR.set(1);
                     }
+                    pub fn toggle() void {
+                        switch (IDR.getEnumValue()) {
+                            .Set => reset(),
+                            .Reset => set(),
+                        }
+                    }
                     // private
                     const Pin: bus_type = PIN;
                     const MODER = Field{ .reg = Reg(0x0, port), .rw = .ReadWrite, .shift = Pin * 2, .width = u2, .values = MODE };
@@ -626,6 +641,10 @@ fn API(comptime port: anytype) enum_type {
                     const AFR = Field{ .reg = Reg(0x20 + (Pin / 8) * 0x4, port), .rw = .ReadWrite, .shift = (Pin % 8) * 4, .width = u4, .values = enum {} };
                     const BSR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = Pin, .width = u1, .values = enum {} };
                     const BRR = Field{ .reg = Reg(0x18, port), .rw = .WriteOnly, .shift = (Pin + 0x10), .width = u1, .values = enum {} };
+                    const IDR = Field{ .reg = Reg(0x10, port), .rw = .ReadOnly, .shift = Pin, .width = u1, .values = enum(u1) {
+                        Reset = 0,
+                        Set = 1,
+                    } };
 
                     pub fn enableGPIOclocks() void {
                         port.api().CLOCKS.enable();
@@ -641,7 +660,11 @@ fn API(comptime port: anytype) enum_type {
                 pub fn enable() void {
                     const en_reg = Bus.AHB4.ports().RCC.regs().MP_AHB4ENSETR.fields();
                     const en = comptime switch (current_port) {
+                        gpioa => en_reg.GPIOAEN,
                         gpiob => en_reg.GPIOBEN,
+                        gpioc => en_reg.GPIOCEN,
+                        gpiod => en_reg.GPIODEN,
+                        gpioe => en_reg.GPIOEEN,
                         gpiog => en_reg.GPIOGEN,
                         else => unreachable,
                     };
@@ -650,7 +673,11 @@ fn API(comptime port: anytype) enum_type {
                 pub fn disable() void {
                     const dis_reg = Bus.AHB4.ports().RCC.regs().MP_AHB4ENCLRR.fields();
                     const dis = comptime switch (current_port) {
+                        gpioa => dis_reg.GPIOEAN,
                         gpiob => dis_reg.GPIOBEN,
+                        gpioc => dis_reg.GPIOCEN,
+                        gpiod => dis_reg.GPIODEN,
+                        gpioe => dis_reg.GPIOEEN,
                         gpiog => dis_reg.GPIOGEN,
                         else => unreachable,
                     };
@@ -716,6 +743,147 @@ fn API(comptime port: anytype) enum_type {
                     TDR.set(byte);
                 }
                 return bytes.len;
+            }
+        },
+        sdmmc1, sdmmc2 => enum(bus_type) {
+            const CLKCR = port.regs().CLKCR.fields();
+            const DDR = CLKCR.DDR.values;
+            const BUSSPEED = CLKCR.BUSSPEED.values;
+            const CLOCK_SRC = CLKCR.SELCLKRX.values;
+            const HW_FC = CLKCR.HWFC_EN.values;
+            const BUSWIDTH = CLKCR.WIDBUS.values;
+            const POWER_MODE = CLKCR.PWRSAV.values;
+            const CLOCK_DIV = CLKCR.CLKDIV.width;
+            const CMDR = port.regs().CMDR.fields();
+            const STAR = port.regs().STAR.fields();
+            const udelay = Bus.AHB4.ports().RCC.api().udelay;
+
+            pub const MediaType = enum {
+                NoMedia,
+                MediaPresent,
+            };
+
+            const CmdRet = union(enum) {
+                const RET_TYPE = enum { R1, R1b, R2, R3, R6, R7, Empty };
+                r1: struct { cmd_idx: u6, card_status: u32 },
+                r1b: struct { cmd_idx: u6, card_status: u32 },
+                r2: u128,
+                r3: u32,
+                r6: struct { rsa: u16, card_status: u16 },
+                r7: u32, // TODO: redefine response fields
+                err: enum {
+                    Busy,
+                    Timeout,
+                    BusTimeout,
+                    CRCError,
+                },
+                empty: void,
+            };
+
+            fn getCmdResp(comptime cmd: Command, arg: u32) CmdRet {
+                if (CMDR.CPSMEN.getEnumValue() == .Asserted)
+                    resetReg(port.regs().CMDR);
+                resetReg(port.regs().DCTRL);
+                const stuff = cmd.getStuff();
+                CMDR.WAITRESP.set(stuff.waitresp);
+                port.regs().DTIMER.fields().DATATIME.set(stuff.timeout);
+                clearInterrupts();
+                port.regs().ARGR.fields().CMDARG.set(arg);
+                CMDR.CMDINDEX.set(@intFromEnum(cmd));
+                CMDR.CPSMEN.setEnumValue(.Asserted);
+
+                var timeout_us: u32 = 10_000;
+                while (true) {
+                    udelay(1);
+                    timeout_us -= 1;
+                    if (timeout_us == 0)
+                        return .{ .err = .Timeout };
+                    if (STAR.CTIMEOUT.getEnumValue() == .Asserted)
+                        return .{ .err = .BusTimeout };
+                    if (stuff.waitresp != .NoResponse) {
+                        if (STAR.CCRCFAIL.getEnumValue() == .Asserted)
+                            return .{ .err = .CRCError };
+                        if (STAR.CMDREND.getEnumValue() == .Asserted)
+                            break;
+                    } else if (STAR.CMDSENT.getEnumValue() == .Asserted)
+                        break;
+                }
+                switch (stuff.ret_type) {
+                    .Empty => return .empty,
+                    else => unreachable,
+                }
+
+                return .empty;
+            }
+
+            const Command = enum(u6) {
+                GO_IDLE_STATE = 0,
+                fn getStuff(comptime cmd: @This()) struct { waitresp: CMDR.WAITRESP.values, timeout: bus_type, ret_type: CmdRet.RET_TYPE } {
+                    return comptime switch (cmd) {
+                        .GO_IDLE_STATE => .{ .waitresp = .NoResponse, .timeout = 0, .ret_type = .Empty },
+                    };
+                }
+            };
+
+            pub fn getMediaType(comptime src_clk_hz: u48) MediaType {
+                init(src_clk_hz / (100_000 * 2), .SDR, .UpTo50MHz, .Internal, .Enabled, .Default1Bit, .Save);
+
+                switch (getCmdResp(.GO_IDLE_STATE, 0)) {
+                    CmdRet.empty => return .MediaPresent,
+                    else => return .NoMedia,
+                }
+            }
+
+            fn clearInterrupts() void {
+                const ICR = port.regs().ICR.fields();
+                comptime var value: bus_type = 0;
+                value |= ICR.CMDSENTC.getMask();
+                value |= ICR.IDMABTCC.getMask();
+                value |= ICR.IDMATEC.getMask();
+                value |= ICR.CKSTOPC.getMask();
+                value |= ICR.VSWENDC.getMask();
+                value |= ICR.ACKTIMEOUTC.getMask();
+                value |= ICR.ACKFAILC.getMask();
+                value |= ICR.SDIOITC.getMask();
+                value |= ICR.DABORTC.getMask();
+                value |= ICR.DBCKENDC.getMask();
+                value |= ICR.DHOLDC.getMask();
+                value |= ICR.DATAENDC.getMask();
+                value |= ICR.CMDRENDC.getMask();
+                value |= ICR.RXOVERRC.getMask();
+                value |= ICR.TXUNDERRC.getMask();
+                value |= ICR.DTIMEOUTC.getMask();
+                value |= ICR.CTIMEOUTC.getMask();
+                value |= ICR.DCRCFAILC.getMask();
+                value |= ICR.CCRCFAILC.getMask();
+                value |= ICR.BUSYD0ENDC.getMask();
+                (@as(*volatile bus_type, @ptrFromInt(@intFromEnum(port.regs().ICR)))).* = value;
+            }
+
+            fn init(comptime clock_div: CLOCK_DIV, comptime mode: DDR, comptime speed: BUSSPEED, comptime clock_src: CLOCK_SRC, comptime hw_flow: HW_FC, comptime width: BUSWIDTH, comptime power_mode: POWER_MODE) void {
+                const POWER_CTRL = port.regs().POWER.fields().PWRCTRL;
+                const RCC = Bus.AHB4.ports().RCC.regs();
+                (comptime switch (port) {
+                    .SDMMC1 => RCC.MP_AHB6ENSETR.fields().SDMMC1EN,
+                    .SDMMC2 => RCC.MP_AHB6ENSETR.fields().SDMMC2EN,
+                }).setEnumValue(.Set);
+                udelay(100);
+
+                POWER_CTRL.setEnumValue(.PowerCycle);
+                udelay(2000);
+                POWER_CTRL.setEnumValue(.PowerOff);
+                udelay(2000);
+
+                CLKCR.CLKDIV.set(clock_div);
+                CLKCR.DDR.set(mode);
+                CLKCR.BUSSPEED.set(speed);
+                CLKCR.SELCLKRX.set(clock_src);
+                CLKCR.HWFC_EN.set(hw_flow);
+                CLKCR.WIDBUS.set(width);
+                CLKCR.PWRSAV.set(power_mode);
+
+                POWER_CTRL.setEnumValue(.PowerOn);
+                udelay(2000);
             }
         },
         secondary_cpu => enum(bus_type) {
@@ -790,6 +958,7 @@ pub const Bus = enum(bus_type) {
     APB5 = 0x5C000000,
     APB4 = 0x5A000000,
     AHB4 = 0x50000000,
+    AHB6 = 0x58000000,
     APB1 = 0x40000000,
     CA7i = 0xA0000000,
 
@@ -844,6 +1013,154 @@ pub const Bus = enum(bus_type) {
                                     },
                                     .ISENABLER => enum {
                                         const VALUE = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    else => enum {},
+                                };
+                            }
+                        },
+                    };
+                }
+            },
+            .AHB6 => enum(bus_type) {
+                pub fn api(port: @This()) enum_type {
+                    return API(port);
+                }
+                SDMMC2 = Port(0x7000, bus),
+                SDMMC1 = Port(0x5000, bus),
+                fn regs(port: @This()) enum_type {
+                    return comptime switch (port) {
+                        .SDMMC1, .SDMMC2 => enum(bus_type) {
+                            POWER = Reg(0x0, port), // SDMMC power control register (SDMMC_POWER)
+                            CLKCR = Reg(0x4, port), // SDMMC clock control register (SDMMC_CLKCR)
+                            ARGR = Reg(0x8, port), // SDMMC argument register (SDMMC_ARGR)
+                            CMDR = Reg(0xC, port), // SDMMC command register (SDMMC_CMDR)
+                            DTIMER = Reg(0x24, port), // SDMMC data length register (SDMMC_DLENR)
+                            DLENR = Reg(0x28, port), // SDMMC data timer register (SDMMC_DTIMER)
+                            DCTRL = Reg(0x2C, port), // SDMMC data control register (SDMMC_DCTRL)
+                            DCNTR = Reg(0x30, port), // SDMMC data counter register (SDMMC_DCNTR)
+                            STAR = Reg(0x34, port), // SDMMC status register (SDMMC_STAR)
+                            ICR = Reg(0x38, port), // SDMMC interrupt clear register (SDMMC_ICR)
+                            MASKR = Reg(0x3C, port), // SDMMC mask register (SDMMC_MASKR)
+                            ACKTIMER = Reg(0x40, port), // SDMMC acknowledgment timer register (SDMMC_ACKTIMER)
+                            IDMACTRLR = Reg(0x50, port), // SDMMC DMA control register (SDMMC_IDMACTRLR)
+                            IDMABSIZER = Reg(0x54, port), // SDMMC IDMA buffer size register (SDMMC_IDMABSIZER)
+                            IDMABASER = Reg(0x58, port), // SDMMC IDMA buffer base address register
+                            IDMALAR = Reg(0x64, port), // SDMMC IDMA linked list address register (SDMMC_IDMALAR)
+                            IDMABAR = Reg(0x68, port), // SDMMC IDMA linked list memory base register (SDMMC_IDMABAR)
+                            fn getValue(reg: @This()) bus_type {
+                                return @as(*volatile bus_type, @ptrFromInt(@intFromEnum(reg))).*;
+                            }
+                            fn fields(reg: @This()) enum_type {
+                                const addr = @intFromEnum(reg);
+                                return comptime switch (reg) {
+                                    .DCTRL => enum {},
+                                    .ICR => enum {
+                                        const IDMABTCC = Flag(28, .ReadWrite, addr);
+                                        const IDMATEC = Flag(27, .ReadWrite, addr);
+                                        const CKSTOPC = Flag(26, .ReadWrite, addr);
+                                        const VSWENDC = Flag(25, .ReadWrite, addr);
+                                        const ACKTIMEOUTC = Flag(24, .ReadWrite, addr);
+                                        const ACKFAILC = Flag(23, .ReadWrite, addr);
+                                        const SDIOITC = Flag(22, .ReadWrite, addr);
+                                        const BUSYD0ENDC = Flag(21, .ReadWrite, addr);
+                                        const DABORTC = Flag(11, .ReadWrite, addr);
+                                        const DBCKENDC = Flag(10, .ReadWrite, addr);
+                                        const DHOLDC = Flag(9, .ReadWrite, addr);
+                                        const DATAENDC = Flag(8, .ReadWrite, addr);
+                                        const CMDSENTC = Flag(7, .ReadWrite, addr);
+                                        const CMDRENDC = Flag(6, .ReadWrite, addr);
+                                        const RXOVERRC = Flag(5, .ReadWrite, addr);
+                                        const TXUNDERRC = Flag(4, .ReadWrite, addr);
+                                        const DTIMEOUTC = Flag(3, .ReadWrite, addr);
+                                        const CTIMEOUTC = Flag(2, .ReadWrite, addr);
+                                        const DCRCFAILC = Flag(1, .ReadWrite, addr);
+                                        const CCRCFAILC = Flag(0, .ReadWrite, addr);
+                                    },
+                                    .DTIMER => enum {
+                                        const DATATIME = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .ARGR => enum {
+                                        const CMDARG = Field{ .rw = .ReadWrite, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .CMDR => enum {
+                                        const CPSMEN = Flag(12, .ReadWrite, addr);
+                                        const WAITPEND = Flag(11, .ReadWrite, addr);
+                                        const WAITINT = Flag(10, .ReadWrite, addr);
+                                        const WAITRESP = Field{ .rw = .ReadWrite, .width = u2, .shift = 8, .reg = addr, .values = enum(u2) {
+                                            NoResponse = 0,
+                                            ShortWithCRC = 1,
+                                            Short = 2,
+                                            LongWithCRC = 3,
+                                        } };
+                                        const CMDINDEX = Field{ .rw = .ReadWrite, .width = u6, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
+                                    .CLKCR => enum {
+                                        const CLKDIV = Field{ .rw = .ReadWrite, .width = u10, .shift = 0, .reg = addr, .values = enum {} };
+                                        const PWRSAV = Field{ .rw = .ReadWrite, .width = u1, .shift = 12, .reg = addr, .values = enum(u1) {
+                                            NoSave = 0,
+                                            Save = 1,
+                                        } };
+                                        const WIDBUS = Field{ .rw = .ReadWrite, .width = u2, .shift = 14, .reg = addr, .values = enum(u2) {
+                                            Default1Bit = 0,
+                                            Wide4Bit = 1,
+                                            Wide8Bit = 2,
+                                        } };
+                                        const NEGEDGE = Field{ .rw = .ReadWrite, .width = u1, .shift = 16, .reg = addr, .values = enum {} };
+                                        const HWFC_EN = Field{ .rw = .ReadWrite, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Disabled = 0,
+                                            Enabled = 1,
+                                        } };
+                                        const DDR = Field{ .rw = .ReadWrite, .width = u1, .shift = 18, .reg = addr, .values = enum(u1) {
+                                            SDR = 0,
+                                            DDR = 1,
+                                        } };
+                                        const BUSSPEED = Field{ .rw = .ReadWrite, .width = u1, .shift = 19, .reg = addr, .values = enum(u1) {
+                                            UpTo50MHz = 0,
+                                            From50MHz = 1,
+                                        } };
+                                        const SELCLKRX = Field{ .rw = .ReadWrite, .width = u2, .shift = 20, .reg = addr, .values = enum(u2) {
+                                            Internal = 0,
+                                            External = 1,
+                                            InternalDelay = 2,
+                                        } };
+                                    },
+                                    .POWER => enum {
+                                        const PWRCTRL = Field{ .rw = .ReadWrite, .width = u2, .shift = 0, .reg = addr, .values = enum(u2) {
+                                            PowerOff = 0,
+                                            PowerCycle = 2,
+                                            PowerOn = 3,
+                                        } };
+                                    },
+                                    .STAR => enum {
+                                        const IDMABTC = Flag(28, .ReadOnly, addr);
+                                        const IDMATE = Flag(27, .ReadOnly, addr);
+                                        const CKSTOP = Flag(26, .ReadOnly, addr);
+                                        const VSWEND = Flag(25, .ReadOnly, addr);
+                                        const ACKTIMEOUT = Flag(24, .ReadOnly, addr);
+                                        const ACKFAIL = Flag(23, .ReadOnly, addr);
+                                        const SDIOIT = Flag(22, .ReadOnly, addr);
+                                        const BUSYD0END = Flag(21, .ReadOnly, addr);
+                                        const BUSYD0 = Flag(20, .ReadOnly, addr);
+                                        const RXFIFOE = Flag(19, .ReadOnly, addr);
+                                        const TXFIFOE = Flag(18, .ReadOnly, addr);
+                                        const RXFIFOF = Flag(17, .ReadOnly, addr);
+                                        const TXFIFOF = Flag(16, .ReadOnly, addr);
+                                        const RXFIFOHF = Flag(15, .ReadOnly, addr);
+                                        const TXFIFOHE = Flag(14, .ReadOnly, addr);
+                                        const CPSMACT = Flag(13, .ReadOnly, addr);
+                                        const DPSMACT = Flag(12, .ReadOnly, addr);
+                                        const DABORT = Flag(11, .ReadOnly, addr);
+                                        const DBCKEND = Flag(10, .ReadOnly, addr);
+                                        const DHOLD = Flag(9, .ReadOnly, addr);
+                                        const DATAEND = Flag(8, .ReadOnly, addr);
+                                        const CMDSENT = Flag(7, .ReadOnly, addr);
+                                        const CMDREND = Flag(6, .ReadOnly, addr);
+                                        const RXOVERR = Flag(5, .ReadOnly, addr);
+                                        const TXUNDERR = Flag(4, .ReadOnly, addr);
+                                        const DTIMEOUT = Flag(3, .ReadOnly, addr);
+                                        const CTIMEOUT = Flag(2, .ReadOnly, addr);
+                                        const DCRCFAIL = Flag(1, .ReadOnly, addr);
+                                        const CCRCFAIL = Flag(0, .ReadOnly, addr);
                                     },
                                     else => enum {},
                                 };
@@ -1351,6 +1668,9 @@ pub const Bus = enum(bus_type) {
                 PWR = Port(0x1000, bus),
                 GPIOA = Port(0x2000, bus),
                 GPIOB = Port(0x3000, bus),
+                GPIOC = Port(0x4000, bus),
+                GPIOD = Port(0x5000, bus),
+                GPIOE = Port(0x6000, bus),
                 GPIOG = Port(0x8000, bus),
 
                 fn regs(port: @This()) enum_type {
@@ -1396,9 +1716,49 @@ pub const Bus = enum(bus_type) {
                             DDRITFCR = Reg(0xD8, port), // RCC DDR interface control register (RCC_DDRITFCR)
                             MP_APB5ENSETR = Reg(0x208, port), // RCC APB5 peripheral enable for MPU set register
                             MP_APB5ENCLRR = Reg(0x20C, port), // RCC APB5 peripheral enable for MPU clear register
+                            SDMMC12CKSELR = Reg(0x8F4, port), // RCC SDMMC1 and 2 kernel clock selection register
+                            MP_AHB6ENSETR = Reg(0x218, port), // RCC AHB6 peripheral enable for MPU set register
+                            MP_AHB6ENCLRR = Reg(0x21C, port), // RCC AHB6 peripheral enable for MPU clear register
+                            AHB6RSTSETR = Reg(0x198, port), // RCC AHB6 peripheral reset set register (RCC_AHB6RSTSETR)
+                            AHB6RSTCLRR = Reg(0x19C, port), // RCC AHB6 peripheral reset set register (RCC_AHB6RSTSETR)
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .AHB6RSTCLRR => enum {
+                                        const SDMMC2RST = Field{ .rw = .WriteOnly, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                        const SDMMC1RST = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                    },
+                                    .AHB6RSTSETR => enum {
+                                        const SDMMC2RST = Field{ .rw = .WriteOnly, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Assert = 1,
+                                        } };
+                                        const SDMMC1RST = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            Assert = 1,
+                                        } };
+                                    },
+                                    .MP_AHB6ENCLRR => enum {
+                                        const SDMMC2EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                        const SDMMC1EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            Clear = 1,
+                                        } };
+                                    },
+                                    .MP_AHB6ENSETR => enum {
+                                        const SDMMC2EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 17, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const SDMMC1EN = Field{ .rw = .WriteOnly, .width = u1, .shift = 16, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                    },
+                                    .SDMMC12CKSELR => enum {
+                                        const SDMMC12SRC = Field{ .rw = .ReadWrite, .width = u3, .shift = 0, .reg = addr, .values = api(port).MUX.source(api(port).MUX.SDMMC12) };
+                                    },
                                     .MP_APB5ENSETR => enum {
                                         const RTCAPBEN = Field{ .rw = .ReadWrite, .width = u1, .shift = 8, .reg = addr, .values = enum(u1) {
                                             NotSet = 0,
@@ -1644,6 +2004,15 @@ pub const Bus = enum(bus_type) {
                                         const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
+                                        const GPIOCEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIODEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 3, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOEEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 4, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
                                         const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
@@ -1653,6 +2022,15 @@ pub const Bus = enum(bus_type) {
                                             Set = 1,
                                         } };
                                         const GPIOBEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 1, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOCEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 2, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIODEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 3, .reg = addr, .values = enum(u1) {
+                                            Set = 1,
+                                        } };
+                                        const GPIOEEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 4, .reg = addr, .values = enum(u1) {
                                             Set = 1,
                                         } };
                                         const GPIOGEN = Field{ .rw = .WriteOnly, .width = u1, .shift = 6, .reg = addr, .values = enum(u1) {
@@ -1740,6 +2118,11 @@ pub const Bus = enum(bus_type) {
 fn Reg(comptime offset: bus_type, comptime port: anytype) bus_type {
     return offset + @intFromEnum(port);
 }
+
+fn resetReg(comptime reg: anytype) void {
+    (@as(*volatile bus_type, @ptrFromInt(@intFromEnum(reg)))).* = 0x0;
+}
+
 fn Port(comptime offset: bus_type, comptime bus: anytype) bus_type {
     return offset + @intFromEnum(bus);
 }
