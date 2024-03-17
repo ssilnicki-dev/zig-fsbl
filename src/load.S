@@ -9,13 +9,6 @@ _start:
     bl main
     b .
 
-.align 8
-_start_co:
-    ldr sp, =0xe0000000 // at this moment DDR has to be already configured
-    bl _init
-    bl main_co
-    b .
-
 _init:
     // enable C10-C11 coprocessors - VFP&NEON
     ldr r1, =0xF00000

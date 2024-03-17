@@ -17,7 +17,6 @@ const GPIOG = Mem.Bus.AHB4.ports().GPIOG.api();
 const SDMMC2 = Mem.Bus.AHB6.ports().SDMMC2.api();
 const SDMMC1 = Mem.Bus.AHB6.ports().SDMMC1.api();
 const SECONDARY_CPU = Mem.Bus.API.ports().SECONDARY_CPU.api();
-extern fn _start_co() void;
 
 export fn main() u8 {
     // RCC init
@@ -45,17 +44,6 @@ export fn main() u8 {
     console.init();
     LED.configure(.Output, .OpenDrain, .High, .Disabled, 0);
 
-    // SDMMC2 - eMMC
-    GPIOB.pin(14).configure(.AltFunc, .PushPull, .Medium, .Disabled, 9); // D0
-    GPIOB.pin(15).configure(.AltFunc, .PushPull, .Medium, .Disabled, 9); // D1
-    GPIOB.pin(3).configure(.AltFunc, .PushPull, .Medium, .Disabled, 9); // D2
-    GPIOB.pin(4).configure(.AltFunc, .PushPull, .Medium, .Disabled, 9); // D3
-    GPIOA.pin(8).configure(.AltFunc, .PushPull, .Medium, .Disabled, 9); // D4
-    GPIOB.pin(9).configure(.AltFunc, .PushPull, .Medium, .Disabled, 10); // D5
-    GPIOC.pin(6).configure(.AltFunc, .PushPull, .Medium, .Disabled, 10); // D6
-    GPIOC.pin(7).configure(.AltFunc, .PushPull, .Medium, .Disabled, 10); // D7
-    GPIOE.pin(3).configure(.AltFunc, .PushPull, .VeryHigh, .Disabled, 9); // CK
-    GPIOG.pin(6).configure(.AltFunc, .PushPull, .Medium, .Disabled, 10); // CMD
     // SDMMC1 - SD
     GPIOC.pin(8).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D0
     GPIOC.pin(9).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D1
@@ -75,20 +63,6 @@ export fn main() u8 {
         LED.reset();
     }
 
-    const emmc2_card_type = SDMMC2.getMediaType(200_000_000);
-    if (emmc2_card_type != .eMMC) {
-        LED.set();
-    }
-
-    // SECONDARY_CPU.start(@intFromPtr(&_start_co));
-    return 0;
-}
-
-export fn main_co() u8 {
-    while (true) {
-        _ = console.write("Hello, world!\r\n");
-        RCC.udelay(500000);
-    }
     return 0;
 }
 
