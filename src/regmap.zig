@@ -756,11 +756,17 @@ fn API(comptime port: anytype) enum_type {
             const CLOCK_DIV = CLKCR.CLKDIV.width;
             const CMDR = port.regs().CMDR.fields();
             const STAR = port.regs().STAR.fields();
+            const RESP1R = port.regs().RESP1R.fields().VALUE;
+            const RESP2R = port.regs().RESP2R.fields().VALUE;
+            const RESP3R = port.regs().RESP3R.fields().VALUE;
+            const RESP4R = port.regs().RESP4R.fields().VALUE;
             const udelay = Bus.AHB4.ports().RCC.api().udelay;
 
             pub const MediaType = enum {
+                BusError,
                 NoMedia,
-                MediaPresent,
+                SDCard,
+                eMMC,
             };
 
             const CmdRet = union(enum) {
@@ -801,7 +807,7 @@ fn API(comptime port: anytype) enum_type {
                     if (STAR.CTIMEOUT.getEnumValue() == .Asserted)
                         return .{ .err = .BusTimeout };
                     if (stuff.waitresp != .NoResponse) {
-                        if (STAR.CCRCFAIL.getEnumValue() == .Asserted)
+                        if ((stuff.waitresp == .ShortWithCRC or stuff.waitresp == .LongWithCRC) and STAR.CCRCFAIL.getEnumValue() == .Asserted)
                             return .{ .err = .CRCError };
                         if (STAR.CMDREND.getEnumValue() == .Asserted)
                             break;
@@ -810,6 +816,8 @@ fn API(comptime port: anytype) enum_type {
                 }
                 switch (stuff.ret_type) {
                     .Empty => return .empty,
+                    .R7 => return .{ .r7 = RESP1R.getIntValue() },
+                    .R3 => return .{ .r3 = RESP1R.getIntValue() },
                     else => unreachable,
                 }
 
@@ -818,18 +826,37 @@ fn API(comptime port: anytype) enum_type {
 
             const Command = enum(u6) {
                 GO_IDLE_STATE = 0,
+                SEND_OP_COND = 1,
+                SEND_IF_COND = 8,
                 fn getStuff(comptime cmd: @This()) struct { waitresp: CMDR.WAITRESP.values, timeout: bus_type, ret_type: CmdRet.RET_TYPE } {
                     return comptime switch (cmd) {
                         .GO_IDLE_STATE => .{ .waitresp = .NoResponse, .timeout = 0, .ret_type = .Empty },
+                        .SEND_OP_COND => .{ .waitresp = .Short, .timeout = 0, .ret_type = .R3 },
+                        .SEND_IF_COND => .{ .waitresp = .ShortWithCRC, .timeout = 0, .ret_type = .R7 },
                     };
                 }
             };
 
             pub fn getMediaType(comptime src_clk_hz: u48) MediaType {
-                init(src_clk_hz / (100_000 * 2), .SDR, .UpTo50MHz, .Internal, .Enabled, .Default1Bit, .Save);
+                init(src_clk_hz / (400_000 * 2), .SDR, .UpTo50MHz, .Internal, .Disabled, .Default1Bit, .Save);
 
-                switch (getCmdResp(.GO_IDLE_STATE, 0)) {
-                    CmdRet.empty => return .MediaPresent,
+                if (getCmdResp(.GO_IDLE_STATE, 0) != .empty)
+                    return .BusError;
+
+                // try detect SD Card
+                switch (getCmdResp(.SEND_IF_COND, 0x1AA)) {
+                    .r7 => |*value| {
+                        if ((value.* & 0x1FF) != 0x1AA) {
+                            return .NoMedia;
+                        } else return .SDCard;
+                        // TODO: shall we support v.1 ????
+                    },
+                    else => {},
+                }
+
+                // try detect eMMC
+                switch (getCmdResp(.SEND_OP_COND, 0x0)) {
+                    .r3 => return .eMMC,
                     else => return .NoMedia,
                 }
             }
@@ -1034,6 +1061,10 @@ pub const Bus = enum(bus_type) {
                             CLKCR = Reg(0x4, port), // SDMMC clock control register (SDMMC_CLKCR)
                             ARGR = Reg(0x8, port), // SDMMC argument register (SDMMC_ARGR)
                             CMDR = Reg(0xC, port), // SDMMC command register (SDMMC_CMDR)
+                            RESP1R = Reg(0x14, port), // SDMMC response x register (SDMMC_RESPxR)
+                            RESP2R = Reg(0x18, port), // SDMMC response x register (SDMMC_RESPxR)
+                            RESP3R = Reg(0x1C, port), // SDMMC response x register (SDMMC_RESPxR)
+                            RESP4R = Reg(0x20, port), // SDMMC response x register (SDMMC_RESPxR)
                             DTIMER = Reg(0x24, port), // SDMMC data length register (SDMMC_DLENR)
                             DLENR = Reg(0x28, port), // SDMMC data timer register (SDMMC_DTIMER)
                             DCTRL = Reg(0x2C, port), // SDMMC data control register (SDMMC_DCTRL)
@@ -1053,6 +1084,9 @@ pub const Bus = enum(bus_type) {
                             fn fields(reg: @This()) enum_type {
                                 const addr = @intFromEnum(reg);
                                 return comptime switch (reg) {
+                                    .RESP1R, .RESP2R, .RESP3R, .RESP4R => enum {
+                                        const VALUE = Field{ .rw = .ReadOnly, .width = u32, .shift = 0, .reg = addr, .values = enum {} };
+                                    },
                                     .DCTRL => enum {},
                                     .ICR => enum {
                                         const IDMABTCC = Flag(28, .ReadWrite, addr);
