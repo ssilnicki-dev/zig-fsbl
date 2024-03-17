@@ -57,12 +57,12 @@ export fn main() u8 {
     GPIOE.pin(3).configure(.AltFunc, .PushPull, .VeryHigh, .Disabled, 9); // CK
     GPIOG.pin(6).configure(.AltFunc, .PushPull, .Medium, .Disabled, 10); // CMD
     // SDMMC1 - SD
-    GPIOC.pin(8).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // D0
-    GPIOC.pin(9).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // D1
-    GPIOC.pin(10).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // D2
+    GPIOC.pin(8).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D0
+    GPIOC.pin(9).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D1
+    GPIOC.pin(10).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D2
     GPIOC.pin(11).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // D3
     GPIOC.pin(12).configure(.AltFunc, .PushPull, .High, .Disabled, 12); // CK
-    GPIOD.pin(2).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // CMD
+    GPIOD.pin(2).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // CMD
     GPIOB.pin(7).configure(.Input, .PushPull, .Medium, .PullUp, 0); // CD
 
     MUX.PLL4.setSource(MUX.source(.PLL4).HSE);
