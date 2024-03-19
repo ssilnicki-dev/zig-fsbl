@@ -58,8 +58,8 @@ export fn main() u8 {
     PLL.PLL4.enableOutput(.P); // for SDMMC MUXer
     MUX.SDMMC12.setSource(MUX.source(.SDMMC12).PLL4);
 
-    const sd1_card_type = SDMMC1.getMediaType(200_000_000);
-    if (sd1_card_type == .SDCard) {
+    const sd1_card_type = SDMMC1.getMediaType(200_000_000, false, .Performance);
+    if (sd1_card_type == .SDHC) {
         LED.reset();
     }
 
