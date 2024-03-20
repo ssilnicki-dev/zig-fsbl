@@ -794,8 +794,10 @@ fn API(comptime port: anytype) enum_type {
                 switch (stuff.ret_type) {
                     .Empty => return .empty,
                     .R7 => return .{ .r7 = RESP1R.getIntValue() },
+                    .R6 => return .{ .r6 = .{ .cmd_idx = @truncate(RESPCMDR.getIntValue()), .rsa = @truncate(RESP1R.getIntValue() >> 16), .card_status = @truncate(RESP1R.getIntValue()) } },
                     .R3 => return .{ .r3 = RESP1R.getIntValue() },
-                    .R1 => return .{ .r1 = .{ .cmd_idx = @intCast(RESPCMDR.getIntValue()), .card_status = RESP1R.getIntValue() } },
+                    .R2 => return .{ .r2 = (@as(u128, RESP4R.getIntValue()) << 0) + (@as(u128, RESP3R.getIntValue()) << 32) + (@as(u128, RESP2R.getIntValue()) << 64) + (@as(u128, RESP1R.getIntValue()) << 96) },
+                    .R1 => return .{ .r1 = .{ .cmd_idx = @truncate(RESPCMDR.getIntValue()), .card_status = RESP1R.getIntValue() } },
                     else => unreachable,
                 }
 
@@ -822,6 +824,8 @@ fn API(comptime port: anytype) enum_type {
             const Command = enum(u6) {
                 GO_IDLE_STATE = 0,
                 SEND_OP_COND = 1,
+                ALL_SEND_CID = 2,
+                SEND_RELATIVE_ADDR = 3,
                 SEND_IF_COND = 8,
                 SD_SEND_OP_COND = 41,
                 APP_CMD = 55,
@@ -829,6 +833,8 @@ fn API(comptime port: anytype) enum_type {
                     return comptime switch (cmd) {
                         .GO_IDLE_STATE => .{ .waitresp = .NoResponse, .timeout = 0, .ret_type = .Empty },
                         .SEND_OP_COND => .{ .waitresp = .Short, .timeout = 0, .ret_type = .R3 },
+                        .ALL_SEND_CID => .{ .waitresp = .LongWithCRC, .timeout = 0, .ret_type = .R2 },
+                        .SEND_RELATIVE_ADDR => .{ .waitresp = .ShortWithCRC, .timeout = 0, .ret_type = .R6 },
                         .SEND_IF_COND => .{ .waitresp = .ShortWithCRC, .timeout = 0, .ret_type = .R7 },
                         .SD_SEND_OP_COND => .{ .waitresp = .Short, .timeout = 0, .ret_type = .R3 },
                         .APP_CMD => .{ .waitresp = .ShortWithCRC, .timeout = 0, .ret_type = .R1 },
@@ -846,18 +852,18 @@ fn API(comptime port: anytype) enum_type {
                 Unsupported,
             };
 
-            pub fn tmp() u32 {
+            pub fn getSDCardAddr() u16 {
                 switch (getCmdResp(.ALL_SEND_CID, 0x0)) {
                     .r2 => {}, // FIXME: unused CID result
-                    else => return 0xEE,
+                    else => return 0,
                 }
                 switch (getCmdResp(.SEND_RELATIVE_ADDR, 0x0)) {
                     .r6 => |*value| {
                         return value.rsa;
                     },
-                    else => return 0xEF,
+                    else => return 0,
                 }
-                return 0x55;
+                return 0;
             }
 
             pub fn getMediaType(comptime src_clk_hz: u48, comptime use_18v: bool, comptime power_mode: enum(bus_type) { PowerSave = 0, Performance = 1 << 28 }) MediaType {
