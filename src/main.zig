@@ -1,27 +1,36 @@
 const Mem = @import("regmap.zig");
-
-const console = Mem.Bus.APB1.ports().UART4.api();
+const bus = @import("regmap_refactoring.zig");
+const std = @import("std");
 const RCC = Mem.Bus.AHB4.ports().RCC.api();
 const MUX = RCC.MUX;
 const PLL = RCC.PLL;
-const LED = Mem.Bus.AHB4.ports().GPIOA.api().pin(13);
+const led = bus.gpioa.pin(13);
 const DDR = @import("regmap.zig").Bus.APB4.ports().DDR.api();
 const TZC = Mem.Bus.APB5.ports().TZC.api();
 
-const GPIOA = Mem.Bus.AHB4.ports().GPIOA.api();
-const GPIOB = Mem.Bus.AHB4.ports().GPIOB.api();
-const GPIOC = Mem.Bus.AHB4.ports().GPIOC.api();
-const GPIOD = Mem.Bus.AHB4.ports().GPIOD.api();
-const GPIOE = Mem.Bus.AHB4.ports().GPIOE.api();
-const GPIOG = Mem.Bus.AHB4.ports().GPIOG.api();
 const SDMMC2 = Mem.Bus.AHB6.ports().SDMMC2.api();
 const SDMMC1 = Mem.Bus.AHB6.ports().SDMMC1.api();
 const SECONDARY_CPU = Mem.Bus.API.ports().SECONDARY_CPU.api();
 
+const uart_writer = writer(void{});
+pub fn printf(comptime fmt: []const u8, args: anytype) void {
+    nosuspend uart_writer.print(fmt, args) catch return;
+}
+
+pub fn stm32mp1_uart4_writer(nt: @TypeOf(void{}), bytes: []const u8) error{}!usize {
+    _ = nt;
+    return bus.uart4.write(bytes);
+}
+
+const Writer = std.io.Writer(@TypeOf(void{}), error{}, stm32mp1_uart4_writer);
+fn writer(nt: @TypeOf(void{})) Writer {
+    return .{ .context = nt };
+}
+
 export fn main() u8 {
     // RCC init
     RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
-    RCC.HSE.init(RCC.EXT_CLOCK_MODE.Crystal);
+    bus.rcc.enableHSE(.Crystal, .Crystal24MHz);
 
     // MPU clock source
     MUX.PLL12.setSource(MUX.source(.PLL12).HSE); // Prepare MPU clock source
@@ -39,19 +48,19 @@ export fn main() u8 {
     _ = DDR.init(ddr_regs_values);
 
     // UART pins SoC dependant
-    GPIOB.pin(2).configure(.AltFunc, .PushPull, .High, .PullUp, 8);
-    GPIOG.pin(11).configure(.AltFunc, .PushPull, .High, .PullUp, 6);
-    console.init();
-    LED.configure(.Output, .OpenDrain, .High, .Disabled, 0);
+    bus.gpiob.pin(2).configure(.AltFunc, .PushPull, .High, .PullUp, 8);
+    bus.gpiog.pin(11).configure(.AltFunc, .PushPull, .High, .PullUp, 6);
+    bus.uart4.configure(.HSI, .B115200, .EightDataBits, .NoParity, .OneStopBit);
+    led.configure(.Output, .OpenDrain, .High, .Disabled, 0);
 
     // SDMMC1 - SD
-    GPIOC.pin(8).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D0
-    GPIOC.pin(9).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D1
-    GPIOC.pin(10).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D2
-    GPIOC.pin(11).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // D3
-    GPIOC.pin(12).configure(.AltFunc, .PushPull, .High, .Disabled, 12); // CK
-    GPIOD.pin(2).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // CMD
-    GPIOB.pin(7).configure(.Input, .PushPull, .Medium, .PullUp, 0); // CD
+    bus.gpioc.pin(8).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D0
+    bus.gpioc.pin(9).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D1
+    bus.gpioc.pin(10).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // D2
+    bus.gpioc.pin(11).configure(.AltFunc, .PushPull, .Medium, .Disabled, 12); // D3
+    bus.gpioc.pin(12).configure(.AltFunc, .PushPull, .High, .Disabled, 12); // CK
+    bus.gpiod.pin(2).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // CMD
+    bus.gpiob.pin(7).configure(.Input, .PushPull, .Medium, .PullUp, 0); // CD
 
     MUX.PLL4.setSource(MUX.source(.PLL4).HSE);
     PLL.PLL4.setDividers(1, 49, 0, 3, 6, 7); // -> 200 MHz on DIVP port
@@ -61,8 +70,8 @@ export fn main() u8 {
     const sd1_card_type = SDMMC1.getMediaType(200_000_000, false, .Performance);
     switch (sd1_card_type) {
         .SDHC, .SDSC => {
-            if (SDMMC1.getSDCardAddr() != 0)
-                LED.reset();
+            printf("sd card addr: {x}\r\n", .{SDMMC1.getSDCardAddr()});
+            led.reset();
         },
         else => {},
     }
