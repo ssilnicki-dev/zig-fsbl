@@ -3,7 +3,6 @@ const bus = @import("regmap_refactoring.zig");
 const std = @import("std");
 const RCC = Mem.Bus.AHB4.ports().RCC.api();
 const MUX = RCC.MUX;
-const PLL = RCC.PLL;
 const led = bus.gpioa.pin(13);
 const DDR = @import("regmap.zig").Bus.APB4.ports().DDR.api();
 const TZC = Mem.Bus.APB5.ports().TZC.api();
@@ -33,15 +32,14 @@ export fn main() u8 {
     bus.rcc.enableHSE(.Crystal, .Crystal24MHz);
 
     // MPU clock source
-    MUX.PLL12.setSource(MUX.source(.PLL12).HSE); // Prepare MPU clock source
-    PLL.PLL1.setDividers(2, 80, 2048, 0, 1, 1); // -> 650 MHz on DIVP PLL1 port
-    PLL.PLL1.enableOutput(.P); // Enable MPU source clock output
+    bus.pll1.configure(.HSE, 2, 80, 2048, 0, 1, 1); // 650 MHz for MPU
+    bus.pll1.enable(.P); // MPU clock source
     MUX.MPU.setSource(MUX.source(.MPU).PLL1); // Switch to new MPU clock source
 
     // AXI, DDR
-    PLL.PLL2.setDividers(2, 65, 5120, 1, 0, 0); // -> 533 MHz on DIVR PPL2 port
-    PLL.PLL2.enableOutput(.R); // Enable DDR source clock output
-    PLL.PLL2.enableOutput(.P); // Enable AXI source clock output
+    bus.pll2.configure(null, 2, 65, 5120, 1, 0, 0); // 533 MHz for DDR
+    bus.pll2.enable(.R); // DDR clock source
+    bus.pll2.enable(.P); // AXI clock source
     MUX.AXI.setSource(MUX.source(.AXI).PLL2); // Switch to new AXI clock source
     RCC.AXI.setDividers(0, 1, 2); // see actual div. values RM0436 Rev 6 pp.662-665
     TZC.initSecureDDRAccess();
@@ -62,9 +60,8 @@ export fn main() u8 {
     bus.gpiod.pin(2).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // CMD
     bus.gpiob.pin(7).configure(.Input, .PushPull, .Medium, .PullUp, 0); // CD
 
-    MUX.PLL4.setSource(MUX.source(.PLL4).HSE);
-    PLL.PLL4.setDividers(1, 49, 0, 3, 6, 7); // -> 200 MHz on DIVP port
-    PLL.PLL4.enableOutput(.P); // for SDMMC MUXer
+    bus.pll4.configure(.HSE, 1, 49, 0, 3, 6, 7); // 200 MHz for SDMMC 1 & 2
+    bus.pll4.enable(.P); // SDMMC clock source
     MUX.SDMMC12.setSource(MUX.source(.SDMMC12).PLL4);
 
     const sd1_card_type = SDMMC1.getMediaType(200_000_000, false, .Performance);

@@ -10,6 +10,10 @@ const hsi_fq_hz: u32 = 64000000;
 
 // main peripheral instantiation
 const bus: struct {
+    pll1: PLL = .{ .cfg1r = .PLL1CFGR1, .cfg2r = .PLL1CFGR2, .fracr = .PLL1FRACR, .cr = .PLL1CR, .mux = .{ .rdy = .{ .reg = .RCK12SELR, .shift = 31 }, .src = .{ .reg = .RCK12SELR, .shift = 0, .width = 2 } } },
+    pll2: PLL = .{ .cfg1r = .PLL2CFGR1, .cfg2r = .PLL2CFGR2, .fracr = .PLL2FRACR, .cr = .PLL2CR, .mux = .{ .rdy = .{ .reg = .RCK12SELR, .shift = 31 }, .src = .{ .reg = .RCK12SELR, .shift = 0, .width = 2 } } },
+    pll3: PLL = .{ .cfg1r = .PLL3CFGR1, .cfg2r = .PLL3CFGR2, .fracr = .PLL3FRACR, .cr = .PLL3CR, .mux = .{ .rdy = .{ .reg = .RCK3SELR, .shift = 31 }, .src = .{ .reg = .RCK3SELR, .shift = 0, .width = 2 } } },
+    pll4: PLL = .{ .cfg1r = .PLL4CFGR1, .cfg2r = .PLL4CFGR2, .fracr = .PLL4FRACR, .cr = .PLL4CR, .mux = .{ .rdy = .{ .reg = .RCK4SELR, .shift = 31 }, .src = .{ .reg = .RCK4SELR, .shift = 0, .width = 2 } } },
     ahb4: struct {
         const base: BusType = 0x50000000;
         rcc: RCC = .{ .port = 0x0 + base },
@@ -25,7 +29,7 @@ const bus: struct {
         uart4: UART = .{
             .port = 0x10000 + base,
             .idx = 4,
-            .mux = .{ .reg = .UART24CKSELR, .shift = 0, .width = 3 },
+            .mux = .{ .src = .{ .reg = .UART24CKSELR, .shift = 0, .width = 3 } },
             .rcc_switch = .{ .set_reg = .MP_APB1ENSETR, .clr_reg = null, .shift = 16 },
         },
     } = .{},
@@ -40,6 +44,10 @@ pub const gpioe = bus.ahb4.gpioe;
 pub const gpiog = bus.ahb4.gpiog;
 pub const uart4 = bus.apb1.uart4;
 pub const rcc = bus.ahb4.rcc;
+pub const pll1 = bus.pll1;
+pub const pll2 = bus.pll2;
+pub const pll3 = bus.pll3;
+pub const pll4 = bus.pll4;
 
 // pripheries private aliasing
 
@@ -186,6 +194,39 @@ const UART = struct {
     }
 };
 
+const PLL = struct {
+    cfg1r: RCC.Reg,
+    cfg2r: RCC.Reg,
+    fracr: RCC.Reg,
+    cr: RCC.Reg,
+    mux: RCC.ClockMuxer,
+    const ClockSource = enum(u2) { HSI = 0, HSE = 1, CSI = 2, I2S_CKIN = 3 };
+    const Output = enum(FieldShiftType) { P = 4, Q = 5, R = 6 };
+    pub fn configure(self: PLL, clock_source: ?ClockSource, m: u6, n: u9, fracv: u13, p: u7, q: u7, r: u7) void {
+        if (clock_source) |src| {
+            rcc.setMuxerValue(self.mux, @intFromEnum(src));
+        }
+        const cfg1r = rcc.getReg(self.cfg1r);
+        const cfg2r = rcc.getReg(self.cfg2r);
+        const fracr = rcc.getReg(self.fracr);
+        const fracle = Field{ .reg = fracr, .shift = 16, .width = 1 };
+        const cr = rcc.getReg(self.cr);
+        const pllrdy = Field{ .reg = cr, .shift = 1, .width = 1, .rw = .ReadOnly };
+        (Field{ .reg = cfg1r, .shift = 16, .width = 6 }).set(m);
+        (Field{ .reg = cfg1r, .shift = 0, .width = 9 }).set(n);
+        fracle.set(0);
+        (Field{ .reg = fracr, .shift = 3, .width = 13 }).set(fracv);
+        fracle.set(1);
+        (Field{ .reg = cfg2r, .shift = 0, .width = 7 }).set(p);
+        (Field{ .reg = cfg2r, .shift = 8, .width = 7 }).set(q);
+        (Field{ .reg = cfg2r, .shift = 16, .width = 7 }).set(r);
+        (Field{ .reg = cr, .shift = 0, .width = 1 }).set(1); // PLLON
+        while (pllrdy.isCleared()) {}
+    }
+    pub fn enable(self: PLL, output: Output) void {
+        (Field{ .reg = rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).set(1);
+    }
+};
 const RCC = struct {
     port: BusType,
     hse_fq_hz: HSEfqHz = .Zero,
@@ -195,9 +236,13 @@ const RCC = struct {
     }
     const ClockSource = enum { HSI };
     const ClockMuxer = struct {
-        reg: Reg,
-        shift: FieldShiftType,
-        width: FieldWidthType,
+        src: FieldDesc,
+        rdy: ?FieldDesc = null,
+        const FieldDesc = struct {
+            reg: Reg,
+            shift: FieldShiftType,
+            width: FieldWidthType = 1,
+        };
     };
     const PeripherySwitch = struct {
         set_reg: Reg,
@@ -237,7 +282,10 @@ const RCC = struct {
     }
 
     fn setMuxerValue(self: RCC, mux: ClockMuxer, value: BusType) void {
-        (Field{ .reg = self.getReg(mux.reg), .shift = mux.shift, .width = mux.width }).set(value);
+        (Field{ .reg = self.getReg(mux.src.reg), .shift = mux.src.shift, .width = mux.src.width }).set(value);
+        if (mux.rdy) |rdy| {
+            while ((Field{ .reg = self.getReg(rdy.reg), .shift = rdy.shift, .width = 1 }).isCleared()) {}
+        }
     }
 
     fn enablePeriphery(self: RCC, periph_switch: PeripherySwitch) void {
