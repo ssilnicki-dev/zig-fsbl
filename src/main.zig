@@ -40,8 +40,7 @@ export fn main() u8 {
     bus.pll2.configure(null, 2, 65, 5120, 1, 0, 0); // 533 MHz for DDR
     bus.pll2.enable(.R); // DDR clock source
     bus.pll2.enable(.P); // AXI clock source
-    MUX.AXI.setSource(MUX.source(.AXI).PLL2); // Switch to new AXI clock source
-    RCC.AXI.setDividers(0, 1, 2); // see actual div. values RM0436 Rev 6 pp.662-665
+    bus.axi.configure(.PLL2, 0, 1, 2);
     TZC.initSecureDDRAccess();
     _ = DDR.init(ddr_regs_values);
 
