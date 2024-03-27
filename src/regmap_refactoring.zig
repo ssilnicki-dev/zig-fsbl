@@ -10,6 +10,7 @@ const hsi_fq_hz: u32 = 64000000;
 
 // main peripheral instantiation
 const bus: struct {
+    axi: AXI = .{ .mux = .{ .src = .{ .reg = .ASSCKSELR, .shift = 0, .width = 3 }, .rdy = .{ .reg = .ASSCKSELR, .shift = 31 } } },
     mpu: MPU = .{ .mux = .{ .src = .{ .reg = .MPCKSELR, .shift = 0, .width = 2 }, .rdy = .{ .reg = .MPCKSELR, .shift = 31 } } },
     pll1: PLL = .{ .cfg1r = .PLL1CFGR1, .cfg2r = .PLL1CFGR2, .fracr = .PLL1FRACR, .cr = .PLL1CR, .mux = .{ .rdy = .{ .reg = .RCK12SELR, .shift = 31 }, .src = .{ .reg = .RCK12SELR, .shift = 0, .width = 2 } } },
     pll2: PLL = .{ .cfg1r = .PLL2CFGR1, .cfg2r = .PLL2CFGR2, .fracr = .PLL2FRACR, .cr = .PLL2CR, .mux = .{ .rdy = .{ .reg = .RCK12SELR, .shift = 31 }, .src = .{ .reg = .RCK12SELR, .shift = 0, .width = 2 } } },
@@ -50,6 +51,7 @@ pub const pll2 = bus.pll2;
 pub const pll3 = bus.pll3;
 pub const pll4 = bus.pll4;
 pub const mpu = bus.mpu;
+pub const axi = bus.axi;
 
 // pripheries private aliasing
 
@@ -201,6 +203,20 @@ const MPU = struct {
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 };
     pub fn configure(self: MPU, clock_source: ClockSource) void {
         rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+    }
+};
+
+const AXI = struct {
+    mux: RCC.ClockMuxer,
+    const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL2 = 2 };
+    pub fn configure(self: AXI, clock_source: ClockSource, prescaler: u3, apb4div: u3, apb5div: u3) void {
+        rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+        (Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 0, .width = 3 }).set(prescaler);
+        while ((Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 31, .width = 1 }).isCleared()) {}
+        (Field{ .reg = rcc.getReg(.APB4DIVR), .shift = 0, .width = 3 }).set(apb4div);
+        while ((Field{ .reg = rcc.getReg(.APB4DIVR), .shift = 31, .width = 1 }).isCleared()) {}
+        (Field{ .reg = rcc.getReg(.APB5DIVR), .shift = 0, .width = 3 }).set(apb5div);
+        while ((Field{ .reg = rcc.getReg(.APB5DIVR), .shift = 31, .width = 1 }).isCleared()) {}
     }
 };
 
