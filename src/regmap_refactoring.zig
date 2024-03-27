@@ -10,6 +10,7 @@ const hsi_fq_hz: u32 = 64000000;
 
 // main peripheral instantiation
 const bus: struct {
+    mpu: MPU = .{ .mux = .{ .src = .{ .reg = .MPCKSELR, .shift = 0, .width = 2 }, .rdy = .{ .reg = .MPCKSELR, .shift = 31 } } },
     pll1: PLL = .{ .cfg1r = .PLL1CFGR1, .cfg2r = .PLL1CFGR2, .fracr = .PLL1FRACR, .cr = .PLL1CR, .mux = .{ .rdy = .{ .reg = .RCK12SELR, .shift = 31 }, .src = .{ .reg = .RCK12SELR, .shift = 0, .width = 2 } } },
     pll2: PLL = .{ .cfg1r = .PLL2CFGR1, .cfg2r = .PLL2CFGR2, .fracr = .PLL2FRACR, .cr = .PLL2CR, .mux = .{ .rdy = .{ .reg = .RCK12SELR, .shift = 31 }, .src = .{ .reg = .RCK12SELR, .shift = 0, .width = 2 } } },
     pll3: PLL = .{ .cfg1r = .PLL3CFGR1, .cfg2r = .PLL3CFGR2, .fracr = .PLL3FRACR, .cr = .PLL3CR, .mux = .{ .rdy = .{ .reg = .RCK3SELR, .shift = 31 }, .src = .{ .reg = .RCK3SELR, .shift = 0, .width = 2 } } },
@@ -48,6 +49,7 @@ pub const pll1 = bus.pll1;
 pub const pll2 = bus.pll2;
 pub const pll3 = bus.pll3;
 pub const pll4 = bus.pll4;
+pub const mpu = bus.mpu;
 
 // pripheries private aliasing
 
@@ -191,6 +193,14 @@ const UART = struct {
             },
             else => unreachable,
         };
+    }
+};
+
+const MPU = struct {
+    mux: RCC.ClockMuxer,
+    const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 };
+    pub fn configure(self: MPU, clock_source: ClockSource) void {
+        rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
     }
 };
 

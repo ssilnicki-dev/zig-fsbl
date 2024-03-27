@@ -34,7 +34,7 @@ export fn main() u8 {
     // MPU clock source
     bus.pll1.configure(.HSE, 2, 80, 2048, 0, 1, 1); // 650 MHz for MPU
     bus.pll1.enable(.P); // MPU clock source
-    MUX.MPU.setSource(MUX.source(.MPU).PLL1); // Switch to new MPU clock source
+    bus.mpu.configure(.PLL1); // Switch to new MPU clock source
 
     // AXI, DDR
     bus.pll2.configure(null, 2, 65, 5120, 1, 0, 0); // 533 MHz for DDR
