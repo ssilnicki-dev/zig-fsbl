@@ -205,9 +205,24 @@ const UART = struct {
 
 const MPU = struct {
     mux: RCC.ClockMuxer,
+    system_clock_hz: u32 = hsi_fq_hz,
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 };
     pub fn configure(self: MPU, clock_source: ClockSource) void {
         rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+    }
+
+    inline fn readCycleCounter() u32 {
+        var value: u32 = undefined;
+        asm volatile ("mrc p15, 0, %[value], c9, c13, 0"
+            : [value] "=r" (value),
+        );
+        return value;
+    }
+    pub fn udelay(self: MPU, usec: u32) void {
+        asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
+        asm volatile ("mrc p15, 0, r0, c9, c12, 1; orr r0, r0, #0x80000000; mcr p15, 0, r0, c9, c12, 1;" ::: "r0"); // enable cycle counter
+        const delay = self.system_clock_hz / 1_000_000 * usec;
+        while (readCycleCounter() < delay) {}
     }
 };
 
