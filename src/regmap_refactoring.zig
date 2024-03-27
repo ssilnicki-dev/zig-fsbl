@@ -35,6 +35,10 @@ const bus: struct {
             .rcc_switch = .{ .set_reg = .MP_APB1ENSETR, .clr_reg = null, .shift = 16 },
         },
     } = .{},
+    apb5: struct {
+        const base: BusType = 0x5C000000;
+        tzc: TZC = .{ .port = 0x6000 + base },
+    } = .{},
 } = .{};
 
 // peripheries public aliasing
@@ -52,6 +56,7 @@ pub const pll3 = bus.pll3;
 pub const pll4 = bus.pll4;
 pub const mpu = bus.mpu;
 pub const axi = bus.axi;
+pub const tzc = bus.apb5.tzc;
 
 // pripheries private aliasing
 
@@ -253,6 +258,38 @@ const PLL = struct {
         (Field{ .reg = rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).set(1);
     }
 };
+
+const TZC = struct {
+    port: BusType,
+    const Reg = enum(BusType) {
+        GATE_KEEPER = 0x8,
+        SPECULATION_CTRL = 0xC,
+        ATTRIBUTE0 = 0x110,
+        ID_ACCESS0 = 0x114,
+    };
+
+    fn getReg(self: TZC, reg: Reg) BusType {
+        return self.port + @intFromEnum(reg);
+    }
+    pub fn initSecureDDRAccess(self: TZC) void {
+        rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 11 }); // TZC1EN
+        rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZC2EN
+        const openreq_flt0 = Field{ .reg = self.getReg(.GATE_KEEPER), .shift = 0, .width = 1 };
+        const openreq_flt1 = Field{ .reg = self.getReg(.GATE_KEEPER), .shift = 1, .width = 1 };
+        openreq_flt0.set(0); // Open
+        openreq_flt1.set(0); // Open
+        (Field{ .reg = self.getReg(.ID_ACCESS0), .shift = 0, .width = 16 }).set(0xFFFF); // NSAID_WR_EN
+        (Field{ .reg = self.getReg(.ID_ACCESS0), .shift = 16, .width = 16 }).set(0xFFFF); // NSAID_RD_EN
+        (Field{ .reg = self.getReg(.ATTRIBUTE0), .shift = 31, .width = 1 }).set(1); // S_WR_EN
+        (Field{ .reg = self.getReg(.ATTRIBUTE0), .shift = 30, .width = 1 }).set(1); // S_RD_EN
+        openreq_flt0.set(1); // Close
+        openreq_flt1.set(1); // Close
+        rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZPCEN
+        (Field{ .reg = self.getReg(.SPECULATION_CTRL), .shift = 0, .width = 1 }).set(1); // READSPEC_DISABLE
+        (Field{ .reg = self.getReg(.SPECULATION_CTRL), .shift = 1, .width = 1 }).set(1); // WRITESPEC_DISABLE
+    }
+};
+
 const RCC = struct {
     port: BusType,
     hse_fq_hz: HSEfqHz = .Zero,

@@ -5,7 +5,6 @@ const RCC = Mem.Bus.AHB4.ports().RCC.api();
 const MUX = RCC.MUX;
 const led = bus.gpioa.pin(13);
 const DDR = @import("regmap.zig").Bus.APB4.ports().DDR.api();
-const TZC = Mem.Bus.APB5.ports().TZC.api();
 
 const SDMMC2 = Mem.Bus.AHB6.ports().SDMMC2.api();
 const SDMMC1 = Mem.Bus.AHB6.ports().SDMMC1.api();
@@ -41,7 +40,7 @@ export fn main() u8 {
     bus.pll2.enable(.R); // DDR clock source
     bus.pll2.enable(.P); // AXI clock source
     bus.axi.configure(.PLL2, 0, 1, 2);
-    TZC.initSecureDDRAccess();
+    bus.tzc.initSecureDDRAccess();
     _ = DDR.init(ddr_regs_values);
 
     // UART pins SoC dependant
