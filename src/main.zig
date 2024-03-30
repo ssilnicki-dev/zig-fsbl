@@ -28,17 +28,15 @@ fn writer(nt: @TypeOf(void{})) Writer {
 export fn main() u8 {
     // RCC init
     RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
-    bus.rcc.enableHSE(.Crystal, .Crystal24MHz);
+    bus.rcc.enableHSE(.Crystal, 24_000_000);
 
     // MPU clock source
     bus.pll1.configure(.HSE, 2, 80, 2048, 0, 1, 1); // 650 MHz for MPU
-    bus.pll1.enable(.P); // MPU clock source
-    bus.mpu.configure(.PLL1); // Switch to new MPU clock source
+    bus.mpu.configure(.PLL1, null); // Switch to new MPU clock source
 
     // AXI, DDR
     bus.pll2.configure(null, 2, 65, 5120, 1, 0, 0); // 533 MHz for DDR
     bus.pll2.enable(.R); // DDR clock source
-    bus.pll2.enable(.P); // AXI clock source
     bus.axi.configure(.PLL2, 0, 1, 2);
     bus.tzc.initSecureDDRAccess();
     _ = DDR.init(ddr_regs_values);
