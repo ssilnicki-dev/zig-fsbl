@@ -28,6 +28,19 @@ const bus: struct {
         gpioe: GPIO = .{ .port = 0x6000 + base, .rcc_switch = .{ .set_reg = .MP_AHB4ENSETR, .clr_reg = .MP_AHB4ENCLRR, .shift = 4 } },
         gpiog: GPIO = .{ .port = 0x8000 + base, .rcc_switch = .{ .set_reg = .MP_AHB4ENSETR, .clr_reg = .MP_AHB4ENCLRR, .shift = 6 } },
     } = .{},
+    ahb6: struct {
+        const base: BusType = 0x58000000;
+        sdmmc1: SDMMC = .{
+            .port = 0x5000 + base,
+            .mux = .{ .src = .{ .reg = .SDMMC12CKSELR, .shift = 0, .width = 3 } },
+            .rcc_switch = .{ .set_reg = .MP_AHB6ENSETR, .clr_reg = .MP_AHB6ENCLRR, .shift = 16 },
+        },
+        sdmmc2: SDMMC = .{
+            .port = 0x7000 + base,
+            .mux = .{ .src = .{ .reg = .SDMMC12CKSELR, .shift = 0, .width = 3 } },
+            .rcc_switch = .{ .set_reg = .MP_AHB6ENSETR, .clr_reg = .MP_AHB6ENCLRR, .shift = 17 },
+        },
+    } = .{},
     apb1: struct {
         const base: BusType = 0x40000000;
         uart4: UART = .{
@@ -64,6 +77,8 @@ pub const mpu = bus.mpu;
 pub const axi = bus.axi;
 pub const tzc = bus.apb5.tzc;
 pub const ddr = bus.apb4.ddr;
+pub const sdmmc1 = bus.ahb6.sdmmc1;
+pub const sdmmc2 = bus.ahb6.sdmmc2;
 
 // pripheries private aliasing
 
@@ -111,7 +126,297 @@ const Field = struct {
     }
 };
 
+const Register = struct {
+    addr: BusType,
+    inline fn reset(self: Register) void {
+        self.set(0x0);
+    }
+    fn set(self: Register, value: BusType) void {
+        @as(*volatile BusType, @ptrFromInt(self.addr)).* = value;
+    }
+    fn get(self: Register) BusType {
+        return @as(*volatile BusType, @ptrFromInt(self.addr)).*;
+    }
+};
 // private peripheries implementation
+
+const SDMMC = struct {
+    port: BusType,
+    mux: RCC.ClockMuxer,
+    rcc_switch: RCC.PeripherySwitch,
+
+    fn getReg(self: SDMMC, reg: Reg) BusType {
+        return self.port + @intFromEnum(reg);
+    }
+    const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
+    pub const MediaType = enum {
+        MediaError,
+        BusError,
+        NoMedia,
+        SDSC,
+        SDHC,
+        eMMC,
+        Unsupported,
+    };
+
+    pub fn setClockSource(self: SDMMC, clock_source: ClockSource) void {
+        rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+        switch (clock_source) {
+            .PLL3 => pll3.enable(.R),
+            .PLL4 => pll4.enable(.P),
+            else => {},
+        }
+    }
+
+    fn getRefClockHz(self: SDMMC) BusType {
+        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(self.mux)))) {
+            .Off => 0,
+            .HCLK6 => axi.getOutputFrequency(.HCLK6),
+            .PLL3 => pll3.getOutputFrequency(.R),
+            .PLL4 => pll4.getOutputFrequency(.P),
+            .HSI => rcc.getOutputFrequency(.HSI),
+        };
+    }
+    fn getPowerCtrl(self: SDMMC) Field {
+        return Field{ .reg = self.getReg(.POWER), .shift = 0, .width = 2 };
+    }
+    fn powerCycle(self: SDMMC) void {
+        self.getPowerCtrl().set(2); // PowerCycle
+        mpu.udelay(2000);
+        self.getPowerCtrl().set(0); // PowerOff
+        mpu.udelay(2000);
+    }
+    fn powerOn(self: SDMMC) void {
+        self.getPowerCtrl().set(3); // PowerOn
+        mpu.udelay(2000);
+    }
+
+    const BusClockMode = enum(u1) { SDR = 0, DDR = 1 };
+    const BusSpeed = enum(u1) { UpTo50MHz = 0, Above50MHz = 1 };
+    const BusRXClockSource = enum(u2) { Internal = 0, External = 1, InternalDelay = 2 };
+    const BusWidth = enum(u2) { Default1Bit = 0, Wide4Bit = 1, Wide8Bit = 2 };
+    const BusPowerSave = enum(u1) { PowerSaveOff = 0, PowerSaveOn = 1 };
+
+    const Command = enum(u6) {
+        GO_IDLE_STATE = 0,
+        SEND_OP_COND = 1,
+        ALL_SEND_CID = 2,
+        SEND_RELATIVE_ADDR = 3,
+        SEND_IF_COND = 8,
+        SD_SEND_OP_COND = 41,
+        APP_CMD = 55,
+        fn getStuff(self: Command) struct { timeout: BusType, ret: RetType } {
+            return switch (self) {
+                .GO_IDLE_STATE => .{ .timeout = 0, .ret = .empty },
+                .SEND_OP_COND => .{ .timeout = 0, .ret = .{ .r3 = undefined } },
+                .ALL_SEND_CID => .{ .timeout = 0, .ret = .{ .r2 = undefined } },
+                .SEND_RELATIVE_ADDR => .{ .timeout = 0, .ret = .{ .r6 = undefined } },
+                .SEND_IF_COND => .{ .timeout = 0, .ret = .{ .r7 = undefined } },
+                .SD_SEND_OP_COND => .{ .timeout = 0, .ret = .{ .r3 = undefined } },
+                .APP_CMD => .{ .timeout = 0, .ret = .{ .r1 = undefined } },
+            };
+        }
+        const RespType = enum(u2) {
+            NoResponse = 0,
+            ShortWithCRC = 1,
+            Short = 2,
+            LongWithCRC = 3,
+        };
+        const RetType = union(enum) {
+            r1: struct { cmd_idx: u6, card_status: u32 },
+            r1b: struct { cmd_idx: u6, card_status: u32 },
+            r2: u128,
+            r3: u32,
+            r6: struct { cmd_idx: u6, rsa: u16, card_status: u16 },
+            r7: u32, // TODO: redefine response fields
+            err: enum {
+                Busy,
+                Timeout,
+                BusTimeout,
+                CRCError,
+            },
+            empty: void,
+            fn getRespType(self: RetType) RespType {
+                return switch (self) {
+                    .r1, .r6, .r7 => .ShortWithCRC,
+                    .r2 => .LongWithCRC,
+                    .r3 => .Short,
+                    else => .NoResponse,
+                };
+            }
+        };
+    };
+
+    fn getCommandResponse(self: SDMMC, cmd: Command, arg: u32) Command.RetType {
+        const cmdr = self.getReg(.CMDR);
+        const cpsmen = Field{ .reg = cmdr, .shift = 12, .width = 1 };
+
+        if (cpsmen.isAsserted())
+            (Register{ .addr = cmdr }).reset();
+        (Register{ .addr = self.getReg(.DCTRL) }).reset();
+        var stuff = cmd.getStuff();
+        const resp_tpye = stuff.ret.getRespType();
+        (Field{ .reg = cmdr, .shift = 8, .width = 2 }).set(@intFromEnum(resp_tpye));
+        (Register{ .addr = self.getReg(.DTIMER) }).set(stuff.timeout);
+        self.clearInterrupts();
+        (Register{ .addr = self.getReg(.ARGR) }).set(arg);
+        (Field{ .reg = cmdr, .shift = 0, .width = 6 }).set(@intFromEnum(cmd));
+        cpsmen.set(1);
+        const star = self.getReg(.STAR);
+        const ctimeout = Field{ .reg = star, .shift = 2, .width = 1, .rw = .ReadOnly };
+        const ccrfail = Field{ .reg = star, .shift = 0, .width = 1, .rw = .ReadOnly };
+        const cmdrend = Field{ .reg = star, .shift = 6, .width = 1, .rw = .ReadOnly };
+        const cmdsent = Field{ .reg = star, .shift = 7, .width = 1, .rw = .ReadOnly };
+
+        var timeout_us: u32 = 10_000;
+        while (true) {
+            mpu.udelay(1);
+            timeout_us -= 1;
+            if (timeout_us == 0)
+                return .{ .err = .Timeout };
+            if (ctimeout.isAsserted())
+                return .{ .err = .BusTimeout };
+            if (resp_tpye != .NoResponse) {
+                if ((resp_tpye == .ShortWithCRC or resp_tpye == .LongWithCRC) and ccrfail.isAsserted())
+                    return .{ .err = .CRCError };
+                if (cmdrend.isAsserted())
+                    break;
+            } else if (cmdsent.isAsserted())
+                break;
+        }
+
+        const respr1r = Register{ .addr = self.getReg(.RESP1R) };
+        const respr2r = Register{ .addr = self.getReg(.RESP2R) };
+        const respr3r = Register{ .addr = self.getReg(.RESP3R) };
+        const respr4r = Register{ .addr = self.getReg(.RESP4R) };
+        const respcmdr = (Field{ .reg = self.getReg(.RESPCMDR), .shift = 0, .width = 6, .rw = .ReadOnly });
+        switch (stuff.ret) {
+            .empty => {},
+            .r7, .r3 => |*value| value.* = respr1r.get(),
+            .r6 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .rsa = @truncate(respr1r.get() >> 16), .card_status = @truncate(respr1r.get()) },
+            .r2 => |*value| value.* = (@as(u128, respr4r.get()) << 0) + (@as(u128, respr3r.get()) << 32) + (@as(u128, respr2r.get()) << 64) + (@as(u128, respr1r.get()) << 96),
+            .r1 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = respr1r.get() },
+            else => unreachable,
+        }
+        return stuff.ret;
+    }
+
+    fn clearInterrupts(self: SDMMC) void {
+        const clear_mask: BusType = 0x1FE00FFF; // all bits
+        (@as(*volatile BusType, @ptrFromInt(self.getReg(.ICR)))).* |= clear_mask;
+    }
+
+    pub fn getMediaType(self: SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) MediaType {
+        self.configure(400_000, .SDR, .Default1Bit, .PowerSaveOn);
+
+        if (self.getCommandResponse(.GO_IDLE_STATE, 0) != .empty)
+            return .BusError;
+
+        // try detect SD Card
+        switch (self.getCommandResponse(.SEND_IF_COND, 0x1AA)) {
+            .r7 => |*value| {
+                if ((value.* & 0x1FF) != 0x1AA) {
+                    return .NoMedia;
+                } // TODO: shall we support v.1 ????
+            },
+            else => {
+                // try detect eMMC
+                switch (self.getCommandResponse(.SEND_OP_COND, 0x0)) {
+                    .r3 => return .eMMC,
+                    else => return .NoMedia,
+                }
+            },
+        }
+        // try setup ~3v SDHC
+        var cntr: u16 = 1_000;
+        while (cntr != 0) {
+            switch (self.getCommandResponse(.APP_CMD, 0)) {
+                .r1 => {}, // ready to receive application command
+                else => return .MediaError,
+            }
+
+            switch (self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) { // HCS, 2.9-3.4 V
+                .r3 => |*value| {
+                    const v = value.*;
+                    if ((v & (1 << 31)) == (1 << 31)) { // only when Busy bit is set
+                        if (v & 0x3E0000 == 0x0)
+                            return .Unsupported;
+                        if (v & 0x40000000 != 0x0)
+                            return .SDHC;
+                        return .SDSC;
+                    }
+                },
+                else => return .MediaError,
+            }
+            cntr -= 1;
+            mpu.udelay(1000);
+        }
+        return .NoMedia;
+    }
+
+    pub fn getSDCardAddr(self: SDMMC) u16 {
+        switch (self.getCommandResponse(.ALL_SEND_CID, 0x0)) {
+            .r2 => {}, // FIXME: unused CID result
+            else => return 0,
+        }
+        switch (self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
+            .r6 => |*value| {
+                return value.rsa;
+            },
+            else => return 0,
+        }
+        return 0;
+    }
+
+    fn configure(self: SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
+        rcc.enablePeriphery(self.rcc_switch);
+        mpu.udelay(100);
+        const ref_clock_hz = self.getRefClockHz();
+        if (ref_clock_hz == 0)
+            return;
+        self.powerCycle();
+        const clkcr = self.getReg(.CLKCR);
+        (Field{ .reg = clkcr, .shift = 0, .width = 10 }).set(ref_clock_hz / (bus_clock_hz * 2)); // CLKDIV
+        (Field{ .reg = clkcr, .shift = 18, .width = 1 }).set(@intFromEnum(mode));
+        if (bus_clock_hz <= 50_000_000) {
+            (Field{ .reg = clkcr, .shift = 19, .width = 1 }).set(@intFromEnum(BusSpeed.UpTo50MHz));
+        } else (Field{ .reg = clkcr, .shift = 19, .width = 1 }).set(@intFromEnum(BusSpeed.Above50MHz));
+
+        // TODO: review RX clock source and HW flow control settings
+        (Field{ .reg = clkcr, .shift = 20, .width = 2 }).set(@intFromEnum(BusRXClockSource.Internal));
+        (Field{ .reg = clkcr, .shift = 17, .width = 1 }).set(0); // HWFC_EN
+
+        (Field{ .reg = clkcr, .shift = 14, .width = 2 }).set(@intFromEnum(width));
+        (Field{ .reg = clkcr, .shift = 12, .width = 1 }).set(@intFromEnum(power_save));
+        self.powerOn();
+    }
+
+    const Reg = enum(BusType) {
+        POWER = 0x0, // SDMMC power control register (SDMMC_POWER)
+        CLKCR = 0x4, // SDMMC clock control register (SDMMC_CLKCR)
+        ARGR = 0x8, // SDMMC argument register (SDMMC_ARGR)
+        CMDR = 0xC, // SDMMC command register (SDMMC_CMDR)
+        RESPCMDR = 0x10, // SDMMC command response register (SDMMC_RESPCMDR)
+        RESP1R = 0x14, // SDMMC response x register (SDMMC_RESPxR)
+        RESP2R = 0x18, // SDMMC response x register (SDMMC_RESPxR)
+        RESP3R = 0x1C, // SDMMC response x register (SDMMC_RESPxR)
+        RESP4R = 0x20, // SDMMC response x register (SDMMC_RESPxR)
+        DTIMER = 0x24, // SDMMC data length register (SDMMC_DLENR)
+        DLENR = 0x28, // SDMMC data timer register (SDMMC_DTIMER)
+        DCTRL = 0x2C, // SDMMC data control register (SDMMC_DCTRL)
+        DCNTR = 0x30, // SDMMC data counter register (SDMMC_DCNTR)
+        STAR = 0x34, // SDMMC status register (SDMMC_STAR)
+        ICR = 0x38, // SDMMC interrupt clear register (SDMMC_ICR)
+        MASKR = 0x3C, // SDMMC mask register (SDMMC_MASKR)
+        ACKTIMER = 0x40, // SDMMC acknowledgment timer register (SDMMC_ACKTIMER)
+        IDMACTRLR = 0x50, // SDMMC DMA control register (SDMMC_IDMACTRLR)
+        IDMABSIZER = 0x54, // SDMMC IDMA buffer size register (SDMMC_IDMABSIZER)
+        IDMABASER = 0x58, // SDMMC IDMA buffer base address register
+        IDMALAR = 0x64, // SDMMC IDMA linked list address register (SDMMC_IDMALAR)
+        IDMABAR = 0x68, // SDMMC IDMA linked list memory base register (SDMMC_IDMABAR)
+    };
+};
+
 const UART = struct {
     port: BusType,
     idx: comptime_int,

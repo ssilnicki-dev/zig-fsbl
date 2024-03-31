@@ -1,13 +1,6 @@
-const Mem = @import("regmap.zig");
 const bus = @import("regmap_refactoring.zig");
 const std = @import("std");
-const RCC = Mem.Bus.AHB4.ports().RCC.api();
-const MUX = RCC.MUX;
 const led = bus.gpioa.pin(13);
-
-const SDMMC2 = Mem.Bus.AHB6.ports().SDMMC2.api();
-const SDMMC1 = Mem.Bus.AHB6.ports().SDMMC1.api();
-const SECONDARY_CPU = Mem.Bus.API.ports().SECONDARY_CPU.api();
 
 const uart_writer = writer(void{});
 pub fn printf(comptime fmt: []const u8, args: anytype) void {
@@ -53,15 +46,14 @@ export fn main() u8 {
     bus.gpiod.pin(2).configure(.AltFunc, .PushPull, .Medium, .PullUp, 12); // CMD
     bus.gpiob.pin(7).configure(.Input, .PushPull, .Medium, .PullUp, 0); // CD
 
-    bus.pll4.configure(.HSE, 1, 49, 0, 3, 6, 7); // 200 MHz for SDMMC 1 & 2
-    bus.pll4.enable(.P); // SDMMC clock source
-    MUX.SDMMC12.setSource(MUX.source(.SDMMC12).PLL4);
+    bus.pll4.configure(.HSE, 1, 49, 0, 2, 6, 7); // 200 MHz for SDMMC 1 & 2
+    bus.sdmmc1.setClockSource(.PLL4);
+    const sd1_media_type = bus.sdmmc1.getMediaType(.Performance);
 
-    const sd1_card_type = SDMMC1.getMediaType(200_000_000, false, .Performance);
-    switch (sd1_card_type) {
+    switch (sd1_media_type) {
         .SDHC, .SDSC => {
-            printf("sd card addr: {x}\r\n", .{SDMMC1.getSDCardAddr()});
-            led.reset();
+            if (bus.sdmmc1.getSDCardAddr() != 0)
+                led.reset();
         },
         else => {},
     }
