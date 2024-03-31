@@ -37,6 +37,10 @@ const bus: struct {
             .rcc_switch = .{ .set_reg = .MP_APB1ENSETR, .clr_reg = null, .shift = 16 },
         },
     } = .{},
+    apb4: struct {
+        const base: BusType = 0x5A000000;
+        ddr: DDR = .{ .ctrl_port = 0x3000 + base, .phyc_port = 0x4000 + base },
+    } = .{},
     apb5: struct {
         const base: BusType = 0x5C000000;
         tzc: TZC = .{ .port = 0x6000 + base },
@@ -59,6 +63,7 @@ pub const pll4 = bus.pll4;
 pub const mpu = bus.mpu;
 pub const axi = bus.axi;
 pub const tzc = bus.apb5.tzc;
+pub const ddr = bus.apb4.ddr;
 
 // pripheries private aliasing
 
@@ -203,6 +208,297 @@ const UART = struct {
             else => unreachable,
         };
     }
+};
+
+const DDR = struct {
+    ctrl_port: BusType,
+    phyc_port: BusType,
+    fn getCtrlReg(self: DDR, comptime reg: CtrlReg) BusType {
+        return @intFromEnum(reg) + self.ctrl_port;
+    }
+    fn getPhycReg(self: DDR, comptime reg: PhycReg) BusType {
+        return @intFromEnum(reg) + self.phyc_port;
+    }
+    fn setCtrlRegs(self: DDR, pairs: []const *const RegValues.CtrlRegValues.Pair) void {
+        for (pairs) |reg_value| {
+            @as(*volatile BusType, @ptrFromInt(self.ctrl_port + @intFromEnum(reg_value.reg))).* = reg_value.value;
+        }
+    }
+    fn setPhycRegs(self: DDR, pairs: []const *const RegValues.PhycRegValues.Pair) void {
+        for (pairs) |reg_value| {
+            @as(*volatile BusType, @ptrFromInt(self.phyc_port + @intFromEnum(reg_value.reg))).* = reg_value.value;
+        }
+    }
+
+    pub fn configure(self: DDR, comptime reg_values: RegValues) bool {
+        pll2.enable(.R);
+        const ddritfcr = rcc.getReg(.DDRITFCR);
+        (Field{ .reg = ddritfcr, .shift = 8, .width = 1 }).set(0); // AXIDCGEN
+
+        (Field{ .reg = ddritfcr, .shift = 14, .width = 1 }).set(1); // DDRCAPBRST
+        (Field{ .reg = ddritfcr, .shift = 15, .width = 1 }).set(1); // DDRCAXIRST
+        (Field{ .reg = ddritfcr, .shift = 16, .width = 1 }).set(1); // DDRCORERST
+        (Field{ .reg = ddritfcr, .shift = 17, .width = 1 }).set(1); // DPHYAPBRST
+        (Field{ .reg = ddritfcr, .shift = 18, .width = 1 }).set(1); // DPHYRST
+        (Field{ .reg = ddritfcr, .shift = 19, .width = 1 }).set(1); // DPHYCTLRST
+
+        (Field{ .reg = ddritfcr, .shift = 0, .width = 1 }).set(1); // DDRC1EN
+        (Field{ .reg = ddritfcr, .shift = 2, .width = 1 }).set(1); // DDRC2EN
+        (Field{ .reg = ddritfcr, .shift = 6, .width = 1 }).set(1); // DDRCAPBEN
+        (Field{ .reg = ddritfcr, .shift = 9, .width = 1 }).set(1); // DDRPHYCAPBEN
+        (Field{ .reg = ddritfcr, .shift = 4, .width = 1 }).set(1); // DDRPHYCEN
+
+        (Field{ .reg = ddritfcr, .shift = 18, .width = 1 }).set(0); // DPHYRST
+        (Field{ .reg = ddritfcr, .shift = 19, .width = 1 }).set(0); // DPHYCTLRST
+        (Field{ .reg = ddritfcr, .shift = 14, .width = 1 }).set(0); // DDRCAPBRST
+        mpu.udelay(2);
+
+        (Field{ .reg = self.getCtrlReg(.DFIMISC), .shift = 0, .width = 1 }).set(0); // DFI_INIT_COMPLETE_EN
+        self.setCtrlRegs(reg_values.ctrl.reg);
+        self.setCtrlRegs(reg_values.ctrl.timing);
+        self.setCtrlRegs(reg_values.ctrl.map);
+        (Field{ .reg = self.getCtrlReg(.INIT0), .shift = 30, .width = 2 }).set(1); // SKIP_DRAM_INIT -> InitSkippedNormal
+        self.setCtrlRegs(reg_values.ctrl.perf);
+
+        (Field{ .reg = ddritfcr, .shift = 16, .width = 1 }).set(0); // DDRCORERST
+        (Field{ .reg = ddritfcr, .shift = 15, .width = 1 }).set(0); // DDRCAXIRST
+        (Field{ .reg = ddritfcr, .shift = 17, .width = 1 }).set(0); // DPHYAPBRST
+
+        self.setPhycRegs(reg_values.phyc.reg);
+        self.setPhycRegs(reg_values.phyc.timing);
+
+        if (!self.phyInitWait())
+            return false;
+
+        const pir_dllsrst_asserted: BusType = 1 << 1;
+        const pir_dlllock_asserted: BusType = 1 << 2;
+        const pir_zcal_asserted: BusType = 1 << 3;
+        const pir_itmsrst_asserted: BusType = 1 << 4;
+        const pir_draminit_asserted: BusType = 1 << 6;
+        const pir_icpc_asserted: BusType = 1 << 16;
+        const pir_init_asserted: BusType = 1 << 0;
+        var pir_reg_value = pir_dllsrst_asserted | pir_dlllock_asserted | pir_zcal_asserted | pir_itmsrst_asserted | pir_draminit_asserted | pir_icpc_asserted | pir_init_asserted;
+        const is_ddr3: bool = (Field{ .reg = self.getCtrlReg(.MSTR), .shift = 0, .width = 1 }).isAsserted(); // DDR3?
+        if (is_ddr3) {
+            const pir_dramrst_asserted: BusType = 1 << 5;
+            pir_reg_value |= pir_dramrst_asserted;
+        }
+        @as(*volatile BusType, @ptrFromInt(self.getPhycReg(PhycReg.PIR))).* = pir_reg_value;
+        mpu.udelay(10);
+        if (!self.phyInitWait())
+            return false;
+
+        const dfi_init_complete_en = Field{ .reg = self.getCtrlReg(.DFIMISC), .shift = 0, .width = 1 };
+        self.startSwDone();
+        dfi_init_complete_en.set(1);
+        self.waitSwDone();
+
+        self.normalOpModeWait();
+        const dis_auto_refresh = Field{ .reg = self.getCtrlReg(.RFSHCTL3), .shift = 0, .width = 1 };
+        const selfref_en = Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 0, .width = 1 };
+        const powerdown_en = Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 1, .width = 1 };
+
+        const dis_auto_refresh_value = dis_auto_refresh.get();
+        const selfref_en_value = selfref_en.get();
+        const powerdown_en_value = powerdown_en.get();
+        const en_dfi_dram_clk_disable_value = (Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 3, .width = 1 }).get();
+
+        self.startSwDone();
+        dis_auto_refresh.set(1);
+        selfref_en.set(0);
+        powerdown_en.set(0);
+        dfi_init_complete_en.set(0);
+        self.waitSwDone();
+
+        const pir_qstrn_asserted: BusType = 1 << 7;
+        pir_reg_value = pir_qstrn_asserted | pir_init_asserted;
+        if (is_ddr3) {
+            const pir_rvtrn_asserted: BusType = 1 << 8;
+            pir_reg_value |= pir_rvtrn_asserted;
+        }
+        @as(*volatile BusType, @ptrFromInt(self.getPhycReg(PhycReg.PIR))).* = pir_reg_value;
+        mpu.udelay(10);
+        if (!self.phyInitWait())
+            return false;
+
+        self.startSwDone();
+        dis_auto_refresh.set(dis_auto_refresh_value);
+        selfref_en.set(selfref_en_value);
+        powerdown_en.set(powerdown_en_value);
+        dfi_init_complete_en.set(1);
+        self.waitSwDone();
+
+        if (en_dfi_dram_clk_disable_value == 0) {
+            (Field{ .reg = ddritfcr, .shift = 20, .width = 3 }).set(1); // DDRCKMOD = AutoSelfRef
+            self.startSwDone();
+            (Field{ .reg = self.getCtrlReg(.HWLPCTL), .shift = 0, .width = 1 }).set(1); // HW_LP_EN
+            (Field{ .reg = self.getCtrlReg(.PWRTMG), .shift = 0, .width = 5 }).set(0x10); // POWERDOWN_TO_X32
+            (Field{ .reg = self.getCtrlReg(.PWRTMG), .shift = 16, .width = 8 }).set(0x1); // SELFREF_TO_X32
+            (Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 3, .width = 1 }).set(1); // EN_DFI_DRAM_CLK_DISABLE
+            if (selfref_en_value == 1)
+                selfref_en.set(1);
+            dfi_init_complete_en.set(1);
+            self.waitSwDone();
+        }
+
+        (Field{ .reg = self.getCtrlReg(.PCTRL_0), .shift = 0, .width = 1 }).set(1); // PORT_EN
+        (Field{ .reg = self.getCtrlReg(.PCTRL_1), .shift = 0, .width = 1 }).set(1); // PORT_EN
+
+        (Field{ .reg = ddritfcr, .shift = 8, .width = 1 }).set(1); // AXIDCGEN
+
+        return true;
+    }
+
+    fn normalOpModeWait(self: DDR) void {
+        const operating_mode = Field{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 0, .width = 3 };
+        const selfref_type = Field{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 4, .width = 2 };
+        while (true) {
+            if (operating_mode.get() == 1) // Normal
+                return;
+            if (operating_mode.get() == 3 and selfref_type.get() == 3) // SelfRefresh & AutoSelfRefresh
+                return;
+        }
+    }
+
+    fn startSwDone(self: DDR) void {
+        (Field{ .reg = self.getCtrlReg(.SWCTL), .shift = 0, .width = 1 }).set(0); // SW_DONE
+    }
+    fn waitSwDone(self: DDR) void {
+        (Field{ .reg = self.getCtrlReg(.SWCTL), .shift = 0, .width = 1 }).set(1); // SW_DONE
+        const sw_done_ack = Field{ .reg = self.getCtrlReg(.SWSTAT), .rw = .ReadOnly, .shift = 0, .width = 1 };
+        while (sw_done_ack.isCleared()) {}
+    }
+
+    fn phyInitWait(self: DDR) bool {
+        const pgsr = self.getPhycReg(PhycReg.PGSR);
+        const dterr = Field{ .reg = pgsr, .shift = 5, .width = 1 };
+        const dtierr = Field{ .reg = pgsr, .shift = 6, .width = 1 };
+        const dfterr = Field{ .reg = pgsr, .shift = 7, .width = 1 };
+        const dverr = Field{ .reg = pgsr, .shift = 8, .width = 1 };
+        const dvierr = Field{ .reg = pgsr, .shift = 9, .width = 1 };
+        const idone = Field{ .reg = pgsr, .shift = 0, .width = 1 };
+        while (true) {
+            if (dterr.isAsserted() or dtierr.isAsserted() or dfterr.isAsserted() or dverr.isAsserted() or dvierr.isAsserted())
+                return false;
+            if (idone.isAsserted())
+                return true;
+        }
+    }
+
+    pub const RegValues = struct {
+        ctrl: CtrlRegValues,
+        phyc: PhycRegValues,
+
+        pub const CtrlRegValues = struct {
+            pub const Pair = struct { reg: CtrlReg, value: BusType };
+            map: []const *const Pair,
+            timing: []const *const Pair,
+            perf: []const *const Pair,
+            reg: []const *const Pair,
+        };
+        pub const PhycRegValues = struct {
+            pub const Pair = struct { reg: PhycReg, value: BusType };
+            reg: []const *const Pair,
+            timing: []const *const Pair,
+        };
+    };
+    const CtrlReg = enum(BusType) {
+        MSTR = 0x0,
+        STAT = 0x4,
+        MRCTRL0 = 0x10,
+        MRCTRL1 = 0x14,
+        DERATEEN = 0x20,
+        DERATEINT = 0x24,
+        PWRCTL = 0x30,
+        PWRTMG = 0x34,
+        HWLPCTL = 0x38,
+        RFSHCTL0 = 0x50,
+        RFSHCTL3 = 0x60,
+        RFSHTMG = 0x64,
+        CRCPARCTL0 = 0xC0,
+        INIT0 = 0xD0,
+        DRAMTMG0 = 0x100,
+        DRAMTMG1 = 0x104,
+        DRAMTMG2 = 0x108,
+        DRAMTMG3 = 0x10C,
+        DRAMTMG4 = 0x110,
+        DRAMTMG5 = 0x114,
+        DRAMTMG6 = 0x118,
+        DRAMTMG7 = 0x11C,
+        DRAMTMG8 = 0x120,
+        DRAMTMG14 = 0x138,
+        ZQCTL0 = 0x180,
+        DFITMG0 = 0x190,
+        DFITMG1 = 0x194,
+        DFILPCFG0 = 0x198,
+        DFIUPD0 = 0x1A0,
+        DFIUPD1 = 0x1A4,
+        DFIUPD2 = 0x1A8,
+        DFIMISC = 0x1B0,
+        DFIPHYMSTR = 0x1C4,
+        ADDRMAP1 = 0x204,
+        ADDRMAP2 = 0x208,
+        ADDRMAP3 = 0x20C,
+        ADDRMAP4 = 0x210,
+        ADDRMAP5 = 0x214,
+        ADDRMAP6 = 0x218,
+        ADDRMAP9 = 0x224,
+        ADDRMAP10 = 0x228,
+        ADDRMAP11 = 0x22C,
+        ODTCFG = 0x240,
+        ODTMAP = 0x244,
+        SCHED = 0x250,
+        SCHED1 = 0x254,
+        PERFHPR1 = 0x25C,
+        PERFLPR1 = 0x264,
+        PERFWR1 = 0x26C,
+        DBG0 = 0x300,
+        DBG1 = 0x304,
+        DBGCMD = 0x30C,
+        SWCTL = 0x320,
+        SWSTAT = 0x324,
+        POISONCFG = 0x36C,
+        PCCFG = 0x400,
+        PCFGR_0 = 0x404,
+        PCFGW_0 = 0x408,
+        PCTRL_0 = 0x490,
+        PCFGQOS0_0 = 0x494,
+        PCFGQOS1_0 = 0x498,
+        PCFGWQOS0_0 = 0x49C,
+        PCFGWQOS1_0 = 0x4A0,
+        PCFGR_1 = 0x404 + 0xB0,
+        PCFGW_1 = 0x408 + 0xB0,
+        PCTRL_1 = 0x490 + 0xB0,
+        PCFGQOS0_1 = 0x494 + 0xB0,
+        PCFGQOS1_1 = 0x498 + 0xB0,
+        PCFGWQOS0_1 = 0x49C + 0xB0,
+        PCFGWQOS1_1 = 0x4A0 + 0xB0,
+    };
+    const PhycReg = enum(BusType) {
+        PIR = 0x4,
+        PGCR = 0x8,
+        PGSR = 0xC,
+        PTR0 = 0x18,
+        PTR1 = 0x1C,
+        PTR2 = 0x20,
+        ACIOCR = 0x24,
+        DXCCR = 0x28,
+        DSGCR = 0x2C,
+        DCR = 0x30,
+        DTPR0 = 0x34,
+        DTPR1 = 0x38,
+        DTPR2 = 0x3C,
+        MR0 = 0x40,
+        MR1 = 0x44,
+        MR2 = 0x48,
+        MR3 = 0x4C,
+        ODTCR = 0x50,
+        ZQ0CR1 = 0x184,
+        DX0GCR = 0x1C0,
+        DX1GCR = 0x200,
+        DX2GCR = 0x240,
+        DX3GCR = 0x280,
+    };
 };
 
 const MPU = struct {
