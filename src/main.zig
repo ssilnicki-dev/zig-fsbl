@@ -26,7 +26,6 @@ fn writer(nt: @TypeOf(void{})) Writer {
 
 export fn main() u8 {
     // RCC init
-    RCC.LSE.init(RCC.EXT_CLOCK_MODE.Crystal);
     bus.rcc.enableHSE(.Crystal, 24_000_000);
 
     // MPU clock source
