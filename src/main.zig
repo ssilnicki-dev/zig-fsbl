@@ -51,12 +51,20 @@ export fn main() u8 {
     const sd1_media_type = bus.sdmmc1.getMediaType(.Performance);
 
     switch (sd1_media_type) {
-        .SDHC, .SDSC => {
-            if (bus.sdmmc1.getSDCardAddr() != 0)
-                led.reset();
+        .SDHC => {
+            switch (bus.sdmmc1.getCard()) {
+                .card => |*card| {
+                    if (card.BlockSize > 0 and card.Blocks512 > 0)
+                        led.reset();
+                    bus.mpu.udelay(400000);
+                },
+                else => {},
+            }
         },
         else => {},
     }
+
+    led.assert();
 
     return 0;
 }

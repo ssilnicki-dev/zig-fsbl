@@ -202,7 +202,9 @@ const SDMMC = struct {
         SEND_OP_COND = 1,
         ALL_SEND_CID = 2,
         SEND_RELATIVE_ADDR = 3,
+        SELECT_DESELECT_CARD = 7,
         SEND_IF_COND = 8,
+        SEND_CSD = 9,
         SD_SEND_OP_COND = 41,
         APP_CMD = 55,
         fn getStuff(self: Command) struct { timeout: BusType = 0, ret: RetType } {
@@ -211,7 +213,9 @@ const SDMMC = struct {
                 .SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
                 .ALL_SEND_CID => .{ .ret = .{ .r2 = undefined } },
                 .SEND_RELATIVE_ADDR => .{ .ret = .{ .r6 = undefined } },
+                .SELECT_DESELECT_CARD => .{ .ret = .{ .r1b = undefined }, .timeout = 0xFFFFFFFF }, // huge timeout value taken from u-boot implementation
                 .SEND_IF_COND => .{ .ret = .{ .r7 = undefined } },
+                .SEND_CSD => .{ .ret = .{ .r2 = undefined } },
                 .SD_SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
                 .APP_CMD => .{ .ret = .{ .r1 = undefined } },
             };
@@ -373,7 +377,77 @@ const SDMMC = struct {
         return .NoMedia;
     }
 
-    pub fn getSDCardAddr(self: SDMMC) u16 {
+    const CSD = struct {
+        value: u128,
+        fn isClass10Card(self: CSD) bool {
+            const csd: u128 = self.value;
+            return @as(u1, @truncate(csd >> 94)) == 1;
+        }
+        fn getBlockSize(self: CSD) u64 {
+            const csd: u128 = self.value;
+            return @as(u64, 1) << @as(u4, @truncate(csd >> 80));
+        }
+        fn getBlocks(self: CSD) union(enum) { blocks512: u64, unsupported: void } {
+            const csd: u128 = self.value;
+            switch (@as(u2, @truncate(csd >> 126))) {
+                0x0 => { // Version 1.0
+                    const c_size: u12 = @truncate(csd >> 62);
+                    const c_size_mult: u3 = @truncate(csd >> 47);
+                    return .{ .blocks512 = (@as(u64, c_size) + 1) * (@as(u64, 1) << (@as(u6, c_size_mult) + 2)) * self.getBlockSize() / 512 };
+                },
+                0x1 => { // Version 2.0
+                    const c_size: u22 = @truncate(csd >> 48);
+                    return .{ .blocks512 = @as(u64, c_size) * 1024 * 512 / 512 };
+                },
+                0x2 => { // Version 3.0
+                    const c_size: u28 = @truncate(csd >> 48);
+                    return .{ .blocks512 = @as(u64, c_size) * 1024 * 512 / 512 };
+                },
+                else => return .unsupported,
+            }
+        }
+        fn canEraseSingleBlock(self: CSD) bool {
+            const csd: u128 = self.value;
+            return @as(u1, @truncate(csd >> 46)) == 1;
+        }
+    };
+
+    fn getCSD(self: SDMMC, addr: u16) union(enum) { csd: CSD, err: void } {
+        switch (self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)) {
+            .r2 => |*csd| return .{ .csd = .{ .value = csd.* } },
+            else => return .err,
+        }
+    }
+
+    const Card = struct {
+        BlockSize: u64 = 0,
+        Blocks512: u64 = 0,
+    };
+
+    pub fn getCard(self: SDMMC) union(enum) { card: Card, err: void, unsupported: void } {
+        const addr = self.getSDCardAddr();
+        if (addr == 0x0)
+            return .err;
+
+        switch (self.getCSD(addr)) {
+            .err => return .err,
+            .csd => |*csd| {
+                if (!csd.isClass10Card() or !csd.canEraseSingleBlock())
+                    return .unsupported;
+                switch (csd.getBlocks()) {
+                    .unsupported => return .unsupported,
+                    .blocks512 => |*blocks| {
+                        if (!self.selectSDCard(addr))
+                            return .err;
+                        return .{ .card = .{ .Blocks512 = blocks.*, .BlockSize = csd.getBlockSize() } };
+                    },
+                }
+            },
+        }
+        return .err;
+    }
+
+    fn getSDCardAddr(self: SDMMC) u16 {
         switch (self.getCommandResponse(.ALL_SEND_CID, 0x0)) {
             .r2 => {}, // FIXME: unused CID result
             else => return 0,
@@ -385,6 +459,12 @@ const SDMMC = struct {
             else => return 0,
         }
         return 0;
+    }
+    fn selectSDCard(self: SDMMC, addr: u16) bool {
+        return switch (self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16)) {
+            .r1b => true,
+            else => false,
+        };
     }
 
     fn configure(self: SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
