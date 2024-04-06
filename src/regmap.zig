@@ -205,15 +205,15 @@ const SDMMC = struct {
         SEND_IF_COND = 8,
         SD_SEND_OP_COND = 41,
         APP_CMD = 55,
-        fn getStuff(self: Command) struct { timeout: BusType, ret: RetType } {
+        fn getStuff(self: Command) struct { timeout: BusType = 0, ret: RetType } {
             return switch (self) {
-                .GO_IDLE_STATE => .{ .timeout = 0, .ret = .empty },
-                .SEND_OP_COND => .{ .timeout = 0, .ret = .{ .r3 = undefined } },
-                .ALL_SEND_CID => .{ .timeout = 0, .ret = .{ .r2 = undefined } },
-                .SEND_RELATIVE_ADDR => .{ .timeout = 0, .ret = .{ .r6 = undefined } },
-                .SEND_IF_COND => .{ .timeout = 0, .ret = .{ .r7 = undefined } },
-                .SD_SEND_OP_COND => .{ .timeout = 0, .ret = .{ .r3 = undefined } },
-                .APP_CMD => .{ .timeout = 0, .ret = .{ .r1 = undefined } },
+                .GO_IDLE_STATE => .{ .ret = .empty },
+                .SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
+                .ALL_SEND_CID => .{ .ret = .{ .r2 = undefined } },
+                .SEND_RELATIVE_ADDR => .{ .ret = .{ .r6 = undefined } },
+                .SEND_IF_COND => .{ .ret = .{ .r7 = undefined } },
+                .SD_SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
+                .APP_CMD => .{ .ret = .{ .r1 = undefined } },
             };
         }
         const RespType = enum(u2) {
@@ -223,8 +223,9 @@ const SDMMC = struct {
             LongWithCRC = 3,
         };
         const RetType = union(enum) {
-            r1: struct { cmd_idx: u6, card_status: u32 },
-            r1b: struct { cmd_idx: u6, card_status: u32 },
+            const R1 = struct { cmd_idx: u6, card_status: u32 };
+            r1: R1,
+            r1b: R1,
             r2: u128,
             r3: u32,
             r6: struct { cmd_idx: u6, rsa: u16, card_status: u16 },
@@ -238,7 +239,7 @@ const SDMMC = struct {
             empty: void,
             fn getRespType(self: RetType) RespType {
                 return switch (self) {
-                    .r1, .r6, .r7 => .ShortWithCRC,
+                    .r1, .r1b, .r6, .r7 => .ShortWithCRC,
                     .r2 => .LongWithCRC,
                     .r3 => .Short,
                     else => .NoResponse,
@@ -267,12 +268,15 @@ const SDMMC = struct {
         const ccrfail = Field{ .reg = star, .shift = 0, .width = 1, .rw = .ReadOnly };
         const cmdrend = Field{ .reg = star, .shift = 6, .width = 1, .rw = .ReadOnly };
         const cmdsent = Field{ .reg = star, .shift = 7, .width = 1, .rw = .ReadOnly };
+        const dtimeout = Field{ .reg = star, .shift = 3, .width = 1, .rw = .ReadOnly };
+        const busyd0 = Field{ .reg = star, .shift = 20, .width = 1, .rw = .ReadOnly };
+        const busyd0end = Field{ .reg = star, .shift = 21, .width = 1, .rw = .ReadOnly };
 
-        var timeout_us: u32 = 10_000;
+        var timeout_us: i32 = 10_000;
+        const system_ticks_per_us = mpu.getSystemClockHz() / 1_000_000;
         while (true) {
-            mpu.udelay(1);
-            timeout_us -= 1;
-            if (timeout_us == 0)
+            mpu.resetUsCounter();
+            if (timeout_us <= 0)
                 return .{ .err = .Timeout };
             if (ctimeout.isAsserted())
                 return .{ .err = .BusTimeout };
@@ -283,6 +287,21 @@ const SDMMC = struct {
                     break;
             } else if (cmdsent.isAsserted())
                 break;
+            timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
+        }
+        switch (stuff.ret) {
+            .r1b => {
+                if (busyd0.isAsserted()) {
+                    timeout_us = 2_000_000;
+                    while (busyd0end.isCleared()) {
+                        mpu.resetUsCounter();
+                        if (timeout_us <= 0 or dtimeout.isAsserted())
+                            return .{ .err = .Timeout };
+                        timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
+                    }
+                }
+            },
+            else => {},
         }
 
         const respr1r = Register{ .addr = self.getReg(.RESP1R) };
@@ -295,7 +314,7 @@ const SDMMC = struct {
             .r7, .r3 => |*value| value.* = respr1r.get(),
             .r6 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .rsa = @truncate(respr1r.get() >> 16), .card_status = @truncate(respr1r.get()) },
             .r2 => |*value| value.* = (@as(u128, respr4r.get()) << 0) + (@as(u128, respr3r.get()) << 32) + (@as(u128, respr2r.get()) << 64) + (@as(u128, respr1r.get()) << 96),
-            .r1 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = respr1r.get() },
+            .r1, .r1b => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = respr1r.get() },
             else => unreachable,
         }
         return stuff.ret;
