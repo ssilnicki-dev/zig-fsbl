@@ -836,6 +836,15 @@ const MPU = struct {
         const delay = self.getSystemClockHz() / 1_000_000 * usec;
         while (readCycleCounter() < delay) {}
     }
+    pub fn resetUsCounter(self: MPU) void {
+        _ = self;
+        asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
+    }
+    pub fn readUsCounter(self: MPU) u32 {
+        _ = self;
+        return readCycleCounter();
+    }
+
     pub fn getSystemClockHz(self: MPU) BusType {
         return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(self.mux)))) {
             .HSI => rcc.getOutputFrequency(.HSI),
