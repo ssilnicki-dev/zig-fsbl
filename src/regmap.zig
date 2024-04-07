@@ -229,7 +229,13 @@ const SDMMC = struct {
             LongWithCRC = 3,
         };
         const RetType = union(enum) {
-            const R1 = struct { cmd_idx: u6, card_status: u32 };
+            const CardStatus = struct {
+                status: u32,
+                pub fn isCardClockedLocked(self: *const CardStatus) bool {
+                    return @as(u1, @truncate(self.status >> 25)) == 1;
+                }
+            };
+            const R1 = struct { cmd_idx: u6, card_status: CardStatus };
             r1: R1,
             r1b: R1,
             r2: u128,
@@ -331,7 +337,7 @@ const SDMMC = struct {
             .r7, .r3 => |*value| value.* = respr1r.get(),
             .r6 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .rsa = @truncate(respr1r.get() >> 16), .card_status = @truncate(respr1r.get()) },
             .r2 => |*value| value.* = (@as(u128, respr4r.get()) << 0) + (@as(u128, respr3r.get()) << 32) + (@as(u128, respr2r.get()) << 64) + (@as(u128, respr1r.get()) << 96),
-            .r1, .r1b => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = respr1r.get() },
+            .r1, .r1b => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = .{ .status = respr1r.get() } },
             else => unreachable,
         }
         return stuff.ret;
