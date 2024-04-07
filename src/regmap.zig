@@ -144,6 +144,7 @@ const SDMMC = struct {
     port: BusType,
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
+    app_cmd_addr: u32 = 0,
 
     fn getReg(self: SDMMC, reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
@@ -254,9 +255,12 @@ const SDMMC = struct {
         };
     };
 
-    fn getCommandResponse(self: SDMMC, cmd: Command, arg: u32) Command.RetType {
+    fn getCommandResponse(self: *const SDMMC, cmd: Command, arg: u32) Command.RetType {
+        if (cmd == .SELECT_DESELECT_CARD)
+            @constCast(self).app_cmd_addr = arg;
+
         if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag) {
-            switch (self.getCommandResponse(.APP_CMD, 0)) {
+            switch (self.getCommandResponse(.APP_CMD, self.app_cmd_addr)) {
                 .r1 => {},
                 else => return .{ .err = .AppCmdError },
             }
