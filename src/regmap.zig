@@ -197,7 +197,8 @@ const SDMMC = struct {
     const BusWidth = enum(u2) { Default1Bit = 0, Wide4Bit = 1, Wide8Bit = 2 };
     const BusPowerSave = enum(u1) { PowerSaveOff = 0, PowerSaveOn = 1 };
 
-    const Command = enum(u6) {
+    const Command = enum(u8) {
+        const app_cmd_flag: u8 = 1 << 7;
         GO_IDLE_STATE = 0,
         SEND_OP_COND = 1,
         ALL_SEND_CID = 2,
@@ -205,7 +206,7 @@ const SDMMC = struct {
         SELECT_DESELECT_CARD = 7,
         SEND_IF_COND = 8,
         SEND_CSD = 9,
-        SD_SEND_OP_COND = 41,
+        SD_SEND_OP_COND = 41 + app_cmd_flag,
         APP_CMD = 55,
         fn getStuff(self: Command) struct { timeout: BusType = 0, ret: RetType } {
             return switch (self) {
@@ -239,6 +240,7 @@ const SDMMC = struct {
                 Timeout,
                 BusTimeout,
                 CRCError,
+                AppCmdError,
             },
             empty: void,
             fn getRespType(self: RetType) RespType {
@@ -253,6 +255,13 @@ const SDMMC = struct {
     };
 
     fn getCommandResponse(self: SDMMC, cmd: Command, arg: u32) Command.RetType {
+        if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag) {
+            switch (self.getCommandResponse(.APP_CMD, 0)) {
+                .r1 => {},
+                else => return .{ .err = .AppCmdError },
+            }
+        }
+
         const cmdr = self.getReg(.CMDR);
         const cpsmen = Field{ .reg = cmdr, .shift = 12, .width = 1 };
 
@@ -351,13 +360,8 @@ const SDMMC = struct {
             },
         }
         // try setup ~3v SDHC
-        var cntr: u16 = 1_000;
-        while (cntr != 0) {
-            switch (self.getCommandResponse(.APP_CMD, 0)) {
-                .r1 => {}, // ready to receive application command
-                else => return .MediaError,
-            }
-
+        var retries: u16 = 1_000;
+        while (retries != 0) {
             switch (self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) { // HCS, 2.9-3.4 V
                 .r3 => |*value| {
                     const v = value.*;
@@ -371,7 +375,7 @@ const SDMMC = struct {
                 },
                 else => return .MediaError,
             }
-            cntr -= 1;
+            retries -= 1;
             mpu.udelay(1000);
         }
         return .NoMedia;
