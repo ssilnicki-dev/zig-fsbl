@@ -207,6 +207,7 @@ const SDMMC = struct {
         SELECT_DESELECT_CARD = 7,
         SEND_IF_COND = 8,
         SEND_CSD = 9,
+        SEND_STATUS = 13,
         SD_SEND_OP_COND = 41 + app_cmd_flag,
         APP_CMD = 55,
         fn getStuff(self: Command) struct { timeout: BusType = 0, ret: RetType } {
@@ -218,6 +219,7 @@ const SDMMC = struct {
                 .SELECT_DESELECT_CARD => .{ .ret = .{ .r1b = undefined }, .timeout = 0xFFFFFFFF }, // huge timeout value taken from u-boot implementation
                 .SEND_IF_COND => .{ .ret = .{ .r7 = undefined } },
                 .SEND_CSD => .{ .ret = .{ .r2 = undefined } },
+                .SEND_STATUS => .{ .ret = .{ .r1 = undefined } },
                 .SD_SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
                 .APP_CMD => .{ .ret = .{ .r1 = undefined } },
             };
@@ -230,9 +232,13 @@ const SDMMC = struct {
         };
         const RetType = union(enum) {
             const CardStatus = struct {
+                const CardState = enum(u4) { Idle = 0, Ready = 1, Ident = 2, StandBy = 3, Transfer = 4, Data = 5, Receive = 6, Prog = 7, Disabled = 8 };
                 status: u32,
                 pub fn isCardClockedLocked(self: *const CardStatus) bool {
                     return @as(u1, @truncate(self.status >> 25)) == 1;
+                }
+                pub fn getState(self: *const CardStatus) CardState {
+                    return @enumFromInt(@as(u4, @truncate(self.status >> 9)));
                 }
             };
             const R1 = struct { cmd_idx: u6, card_status: CardStatus };
@@ -436,6 +442,44 @@ const SDMMC = struct {
     const Card = struct {
         BlockSize: u64 = 0,
         Blocks512: u64 = 0,
+        addr: u16,
+        bus_dev: *const SDMMC,
+        const CardState = Command.RetType.CardStatus.CardState;
+        pub fn getState(self: *const Card) union(enum) { state: CardState, err: void } {
+            return switch (self.bus_dev.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
+                .r1 => |*resp| .{ .state = resp.card_status.getState() },
+                else => .err,
+            };
+        }
+        pub fn select(self: *const Card) bool {
+            switch (self.getState()) {
+                .err => return false,
+                .state => |*state| {
+                    switch (state.*) {
+                        .Transfer => return true,
+                        else => {},
+                    }
+                },
+            }
+            if (!self.bus_dev.selectSDCard(self.addr))
+                return false;
+
+            var retries: i32 = 10;
+            while (retries > 0) {
+                mpu.udelay(1000);
+                switch (self.getState()) {
+                    .err => return false,
+                    .state => |*state| {
+                        switch (state.*) {
+                            .Transfer => return true,
+                            else => continue,
+                        }
+                    },
+                }
+                retries -= 1;
+            }
+            return false;
+        }
     };
 
     pub fn getCard(self: *const SDMMC) union(enum) { card: Card, err: void, unsupported: void } {
@@ -451,9 +495,7 @@ const SDMMC = struct {
                 switch (csd.getBlocks()) {
                     .unsupported => return .unsupported,
                     .blocks512 => |*blocks| {
-                        if (!self.selectSDCard(addr))
-                            return .err;
-                        return .{ .card = .{ .Blocks512 = blocks.*, .BlockSize = csd.getBlockSize() } };
+                        return .{ .card = .{ .addr = addr, .bus_dev = self, .Blocks512 = blocks.*, .BlockSize = csd.getBlockSize() } };
                     },
                 }
             },
