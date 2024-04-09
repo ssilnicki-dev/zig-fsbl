@@ -1,7 +1,5 @@
 .section .text
 .global _start
-.global _start_co
-
 
 _start:
     ldr sp, =0x30000000
