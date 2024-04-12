@@ -144,23 +144,33 @@ const SDMMC = struct {
     port: BusType,
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
+    app_cmd_addr: u32 = 0,
 
-    fn getReg(self: SDMMC, reg: Reg) BusType {
-        return self.port + @intFromEnum(reg);
-    }
-    const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
-    pub const MediaType = enum {
+    pub const Error = error{
         MediaError,
         BusError,
         NoMedia,
+        Unsupported,
+        Busy,
+        Timeout,
+        BusTimeout,
+        CRCError,
+        AppCmdError,
+    };
+
+    pub const MediaType = enum {
         SDSC,
         SDHC,
         eMMC,
-        Unsupported,
     };
 
-    pub fn setClockSource(self: SDMMC, clock_source: ClockSource) void {
-        rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+    fn getReg(self: *const SDMMC, reg: Reg) BusType {
+        return self.port + @intFromEnum(reg);
+    }
+    const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
+
+    pub fn setClockSource(self: *const SDMMC, clock_source: ClockSource) void {
+        rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         switch (clock_source) {
             .PLL3 => pll3.enable(.R),
             .PLL4 => pll4.enable(.P),
@@ -168,8 +178,8 @@ const SDMMC = struct {
         }
     }
 
-    fn getRefClockHz(self: SDMMC) BusType {
-        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(self.mux)))) {
+    fn getRefClockHz(self: *const SDMMC) BusType {
+        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
             .Off => 0,
             .HCLK6 => axi.getOutputFrequency(.HCLK6),
             .PLL3 => pll3.getOutputFrequency(.R),
@@ -177,16 +187,17 @@ const SDMMC = struct {
             .HSI => rcc.getOutputFrequency(.HSI),
         };
     }
-    fn getPowerCtrl(self: SDMMC) Field {
+
+    fn getPowerCtrl(self: *const SDMMC) Field {
         return Field{ .reg = self.getReg(.POWER), .shift = 0, .width = 2 };
     }
-    fn powerCycle(self: SDMMC) void {
+    fn powerCycle(self: *const SDMMC) void {
         self.getPowerCtrl().set(2); // PowerCycle
         mpu.udelay(2000);
         self.getPowerCtrl().set(0); // PowerOff
         mpu.udelay(2000);
     }
-    fn powerOn(self: SDMMC) void {
+    fn powerOn(self: *const SDMMC) void {
         self.getPowerCtrl().set(3); // PowerOn
         mpu.udelay(2000);
     }
@@ -197,23 +208,30 @@ const SDMMC = struct {
     const BusWidth = enum(u2) { Default1Bit = 0, Wide4Bit = 1, Wide8Bit = 2 };
     const BusPowerSave = enum(u1) { PowerSaveOff = 0, PowerSaveOn = 1 };
 
-    const Command = enum(u6) {
+    const Command = enum(u8) {
+        const app_cmd_flag: u8 = 1 << 7;
         GO_IDLE_STATE = 0,
         SEND_OP_COND = 1,
         ALL_SEND_CID = 2,
         SEND_RELATIVE_ADDR = 3,
+        SELECT_DESELECT_CARD = 7,
         SEND_IF_COND = 8,
-        SD_SEND_OP_COND = 41,
+        SEND_CSD = 9,
+        SEND_STATUS = 13,
+        SD_SEND_OP_COND = 41 + app_cmd_flag,
         APP_CMD = 55,
-        fn getStuff(self: Command) struct { timeout: BusType, ret: RetType } {
-            return switch (self) {
-                .GO_IDLE_STATE => .{ .timeout = 0, .ret = .empty },
-                .SEND_OP_COND => .{ .timeout = 0, .ret = .{ .r3 = undefined } },
-                .ALL_SEND_CID => .{ .timeout = 0, .ret = .{ .r2 = undefined } },
-                .SEND_RELATIVE_ADDR => .{ .timeout = 0, .ret = .{ .r6 = undefined } },
-                .SEND_IF_COND => .{ .timeout = 0, .ret = .{ .r7 = undefined } },
-                .SD_SEND_OP_COND => .{ .timeout = 0, .ret = .{ .r3 = undefined } },
-                .APP_CMD => .{ .timeout = 0, .ret = .{ .r1 = undefined } },
+        fn getStuff(comptime self: Command) struct { ret: RetType, timeout: BusType = 0 } {
+            return comptime switch (self) {
+                .GO_IDLE_STATE => .{ .ret = .empty },
+                .SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
+                .ALL_SEND_CID => .{ .ret = .{ .r2 = undefined } },
+                .SEND_RELATIVE_ADDR => .{ .ret = .{ .r6 = undefined } },
+                .SELECT_DESELECT_CARD => .{ .ret = .{ .r1b = undefined }, .timeout = 0xFFFFFFFF }, // huge timeout value taken from u-boot implementation
+                .SEND_IF_COND => .{ .ret = .{ .r7 = undefined } },
+                .SEND_CSD => .{ .ret = .{ .r2 = undefined } },
+                .SEND_STATUS => .{ .ret = .{ .r1 = undefined } },
+                .SD_SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
+                .APP_CMD => .{ .ret = .{ .r1 = undefined } },
             };
         }
         const RespType = enum(u2) {
@@ -223,22 +241,27 @@ const SDMMC = struct {
             LongWithCRC = 3,
         };
         const RetType = union(enum) {
-            r1: struct { cmd_idx: u6, card_status: u32 },
-            r1b: struct { cmd_idx: u6, card_status: u32 },
+            const CardStatus = struct {
+                const CardState = enum(u4) { Idle = 0, Ready = 1, Ident = 2, StandBy = 3, Transfer = 4, Data = 5, Receive = 6, Prog = 7, Disabled = 8 };
+                status: u32,
+                pub fn isCardClockedLocked(self: *const CardStatus) bool {
+                    return @as(u1, @truncate(self.status >> 25)) == 1;
+                }
+                pub fn getState(self: *const CardStatus) CardState {
+                    return @enumFromInt(@as(u4, @truncate(self.status >> 9)));
+                }
+            };
+            const R1 = struct { cmd_idx: u6, card_status: CardStatus };
+            r1: R1,
+            r1b: R1,
             r2: u128,
             r3: u32,
             r6: struct { cmd_idx: u6, rsa: u16, card_status: u16 },
             r7: u32, // TODO: redefine response fields
-            err: enum {
-                Busy,
-                Timeout,
-                BusTimeout,
-                CRCError,
-            },
             empty: void,
             fn getRespType(self: RetType) RespType {
                 return switch (self) {
-                    .r1, .r6, .r7 => .ShortWithCRC,
+                    .r1, .r1b, .r6, .r7 => .ShortWithCRC,
                     .r2 => .LongWithCRC,
                     .r3 => .Short,
                     else => .NoResponse,
@@ -247,128 +270,230 @@ const SDMMC = struct {
         };
     };
 
-    fn getCommandResponse(self: SDMMC, cmd: Command, arg: u32) Command.RetType {
+    fn getCommandResponse(self: *const SDMMC, comptime cmd: Command, arg: u32) Error!Command.RetType {
+        if (cmd == .SELECT_DESELECT_CARD)
+            @constCast(self).app_cmd_addr = arg;
+
+        if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag)
+            _ = try (self.getCommandResponse(.APP_CMD, self.app_cmd_addr));
+
         const cmdr = self.getReg(.CMDR);
-        const cpsmen = Field{ .reg = cmdr, .shift = 12, .width = 1 };
+        const cpsmen: Field = .{ .reg = cmdr, .shift = 12, .width = 1 };
 
         if (cpsmen.isAsserted())
             (Register{ .addr = cmdr }).reset();
         (Register{ .addr = self.getReg(.DCTRL) }).reset();
         var stuff = cmd.getStuff();
-        const resp_tpye = stuff.ret.getRespType();
-        (Field{ .reg = cmdr, .shift = 8, .width = 2 }).set(@intFromEnum(resp_tpye));
+        const resp_type = stuff.ret.getRespType();
+        (Field{ .reg = cmdr, .shift = 8, .width = 2 }).set(@intFromEnum(resp_type));
         (Register{ .addr = self.getReg(.DTIMER) }).set(stuff.timeout);
         self.clearInterrupts();
         (Register{ .addr = self.getReg(.ARGR) }).set(arg);
         (Field{ .reg = cmdr, .shift = 0, .width = 6 }).set(@intFromEnum(cmd));
         cpsmen.set(1);
         const star = self.getReg(.STAR);
-        const ctimeout = Field{ .reg = star, .shift = 2, .width = 1, .rw = .ReadOnly };
-        const ccrfail = Field{ .reg = star, .shift = 0, .width = 1, .rw = .ReadOnly };
-        const cmdrend = Field{ .reg = star, .shift = 6, .width = 1, .rw = .ReadOnly };
-        const cmdsent = Field{ .reg = star, .shift = 7, .width = 1, .rw = .ReadOnly };
+        const ctimeout: Field = .{ .reg = star, .shift = 2, .width = 1, .rw = .ReadOnly };
+        const ccrfail: Field = .{ .reg = star, .shift = 0, .width = 1, .rw = .ReadOnly };
+        const cmdrend: Field = .{ .reg = star, .shift = 6, .width = 1, .rw = .ReadOnly };
+        const cmdsent: Field = .{ .reg = star, .shift = 7, .width = 1, .rw = .ReadOnly };
+        const dtimeout: Field = .{ .reg = star, .shift = 3, .width = 1, .rw = .ReadOnly };
+        const busyd0: Field = .{ .reg = star, .shift = 20, .width = 1, .rw = .ReadOnly };
+        const busyd0end: Field = .{ .reg = star, .shift = 21, .width = 1, .rw = .ReadOnly };
 
-        var timeout_us: u32 = 10_000;
+        var timeout_us: i32 = 10_000;
+        const system_ticks_per_us = mpu.getSystemClockHz() / 1_000_000;
         while (true) {
-            mpu.udelay(1);
-            timeout_us -= 1;
-            if (timeout_us == 0)
-                return .{ .err = .Timeout };
+            mpu.resetUsCounter();
+            if (timeout_us <= 0)
+                return Error.Timeout;
             if (ctimeout.isAsserted())
-                return .{ .err = .BusTimeout };
-            if (resp_tpye != .NoResponse) {
-                if ((resp_tpye == .ShortWithCRC or resp_tpye == .LongWithCRC) and ccrfail.isAsserted())
-                    return .{ .err = .CRCError };
+                return Error.BusTimeout;
+            if (resp_type != .NoResponse) {
+                if ((resp_type == .ShortWithCRC or resp_type == .LongWithCRC) and ccrfail.isAsserted())
+                    return Error.CRCError;
                 if (cmdrend.isAsserted())
                     break;
             } else if (cmdsent.isAsserted())
                 break;
+            timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
+        }
+        switch (stuff.ret) {
+            .r1b => {
+                if (busyd0.isAsserted()) {
+                    timeout_us = 2_000_000;
+                    while (busyd0end.isCleared()) {
+                        mpu.resetUsCounter();
+                        if (timeout_us <= 0 or dtimeout.isAsserted())
+                            return Error.Timeout;
+                        timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
+                    }
+                }
+            },
+            else => {},
         }
 
-        const respr1r = Register{ .addr = self.getReg(.RESP1R) };
-        const respr2r = Register{ .addr = self.getReg(.RESP2R) };
-        const respr3r = Register{ .addr = self.getReg(.RESP3R) };
-        const respr4r = Register{ .addr = self.getReg(.RESP4R) };
-        const respcmdr = (Field{ .reg = self.getReg(.RESPCMDR), .shift = 0, .width = 6, .rw = .ReadOnly });
+        const respr1r: Register = .{ .addr = self.getReg(.RESP1R) };
+        const respr2r: Register = .{ .addr = self.getReg(.RESP2R) };
+        const respr3r: Register = .{ .addr = self.getReg(.RESP3R) };
+        const respr4r: Register = .{ .addr = self.getReg(.RESP4R) };
+        const respcmdr: Field = .{ .reg = self.getReg(.RESPCMDR), .shift = 0, .width = 6, .rw = .ReadOnly };
         switch (stuff.ret) {
             .empty => {},
             .r7, .r3 => |*value| value.* = respr1r.get(),
             .r6 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .rsa = @truncate(respr1r.get() >> 16), .card_status = @truncate(respr1r.get()) },
             .r2 => |*value| value.* = (@as(u128, respr4r.get()) << 0) + (@as(u128, respr3r.get()) << 32) + (@as(u128, respr2r.get()) << 64) + (@as(u128, respr1r.get()) << 96),
-            .r1 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = respr1r.get() },
-            else => unreachable,
+            .r1, .r1b => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = .{ .status = respr1r.get() } },
         }
         return stuff.ret;
     }
 
-    fn clearInterrupts(self: SDMMC) void {
+    fn clearInterrupts(self: *const SDMMC) void {
         const clear_mask: BusType = 0x1FE00FFF; // all bits
         (@as(*volatile BusType, @ptrFromInt(self.getReg(.ICR)))).* |= clear_mask;
     }
 
-    pub fn getMediaType(self: SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) MediaType {
+    pub fn getMediaType(self: *const SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) Error!MediaType {
         self.configure(400_000, .SDR, .Default1Bit, .PowerSaveOn);
 
-        if (self.getCommandResponse(.GO_IDLE_STATE, 0) != .empty)
-            return .BusError;
+        _ = try self.getCommandResponse(.GO_IDLE_STATE, 0);
 
         // try detect SD Card
-        switch (self.getCommandResponse(.SEND_IF_COND, 0x1AA)) {
-            .r7 => |*value| {
-                if ((value.* & 0x1FF) != 0x1AA) {
-                    return .NoMedia;
-                } // TODO: shall we support v.1 ????
-            },
-            else => {
-                // try detect eMMC
-                switch (self.getCommandResponse(.SEND_OP_COND, 0x0)) {
-                    .r3 => return .eMMC,
-                    else => return .NoMedia,
-                }
-            },
-        }
-        // try setup ~3v SDHC
-        var cntr: u16 = 1_000;
-        while (cntr != 0) {
-            switch (self.getCommandResponse(.APP_CMD, 0)) {
-                .r1 => {}, // ready to receive application command
-                else => return .MediaError,
+        if (self.getCommandResponse(.SEND_IF_COND, 0x1AA)) |ret| {
+            switch (ret) {
+                .r7 => |*v| {
+                    if ((v.* & 0x1FF) != 0x1AA)
+                        return Error.NoMedia; // TODO: shall we support v.1 ????
+                },
+                else => unreachable,
             }
+        } else |err| {
+            _ = &err;
+            _ = try self.getCommandResponse(.SEND_OP_COND, 0x0);
+            return MediaType.eMMC;
+        }
 
-            switch (self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) { // HCS, 2.9-3.4 V
-                .r3 => |*value| {
-                    const v = value.*;
-                    if ((v & (1 << 31)) == (1 << 31)) { // only when Busy bit is set
-                        if (v & 0x3E0000 == 0x0)
-                            return .Unsupported;
-                        if (v & 0x40000000 != 0x0)
-                            return .SDHC;
-                        return .SDSC;
+        // try setup ~3v SDHC
+        var retries: u16 = 1_000;
+        while (retries != 0) {
+            switch (try self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) {
+                .r3 => |*v| {
+                    if ((v.* & (1 << 31)) == (1 << 31)) { // only when Busy bit is set
+                        if (v.* & 0x3E0000 == 0x0)
+                            return Error.Unsupported;
+                        if (v.* & 0x40000000 != 0x0)
+                            return MediaType.SDHC;
+                        return MediaType.SDSC;
                     }
                 },
-                else => return .MediaError,
+                else => unreachable,
             }
-            cntr -= 1;
+            retries -= 1;
             mpu.udelay(1000);
         }
-        return .NoMedia;
+        return Error.NoMedia;
     }
 
-    pub fn getSDCardAddr(self: SDMMC) u16 {
-        switch (self.getCommandResponse(.ALL_SEND_CID, 0x0)) {
-            .r2 => {}, // FIXME: unused CID result
-            else => return 0,
+    const CSD = struct {
+        value: u128,
+        fn isClass10Card(self: *const CSD) bool {
+            const csd: u128 = self.value;
+            return @as(u1, @truncate(csd >> 94)) == 1;
         }
-        switch (self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
-            .r6 => |*value| {
-                return value.rsa;
+        fn getBlockSize(self: *const CSD) u64 {
+            const csd: u128 = self.value;
+            return @as(u64, 1) << @as(u4, @truncate(csd >> 80));
+        }
+        fn getBlocks(self: *const CSD) Error!u64 {
+            const csd: u128 = self.value;
+            switch (@as(u2, @truncate(csd >> 126))) {
+                0x0 => { // Version 1.0
+                    const c_size: u12 = @truncate(csd >> 62);
+                    const c_size_mult: u3 = @truncate(csd >> 47);
+                    return (@as(u64, c_size) + 1) * (@as(u64, 1) << (@as(u6, c_size_mult) + 2)) * self.getBlockSize() / 512;
+                },
+                0x1 => { // Version 2.0
+                    const c_size: u22 = @truncate(csd >> 48);
+                    return @as(u64, c_size) * 1024 * 512 / 512;
+                },
+                0x2 => { // Version 3.0
+                    const c_size: u28 = @truncate(csd >> 48);
+                    return @as(u64, c_size) * 1024 * 512 / 512;
+                },
+                else => return Error.Unsupported,
+            }
+        }
+        fn canEraseSingleBlock(self: *const CSD) bool {
+            const csd: u128 = self.value;
+            return @as(u1, @truncate(csd >> 46)) == 1;
+        }
+    };
+
+    fn getCSD(self: *const SDMMC, addr: u16) Error!CSD {
+        switch (try self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)) {
+            .r2 => |*csd| return .{ .value = csd.* },
+            else => unreachable,
+        }
+    }
+
+    const Card = struct {
+        BlockSize: u64 = 0,
+        Blocks512: u64 = 0,
+        addr: u16,
+        bus_dev: *const SDMMC,
+        const CardState = Command.RetType.CardStatus.CardState;
+        pub fn getState(self: *const Card) Error!CardState {
+            return switch (try self.bus_dev.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
+                .r1 => |*resp| resp.card_status.getState(),
+                else => unreachable,
+            };
+        }
+        pub fn select(self: *const Card) Error!void {
+            switch (try self.getState()) {
+                .Transfer => return,
+                else => {},
+            }
+            try self.bus_dev.selectSDCard(self.addr);
+
+            var retries: i32 = 10;
+            while (retries > 0) {
+                mpu.udelay(1000);
+                switch (try self.getState()) {
+                    .Transfer => return,
+                    else => continue,
+                }
+                retries -= 1;
+            }
+            return Error.Busy;
+        }
+    };
+
+    pub fn getCard(self: *const SDMMC) Error!Card {
+        const addr = try self.getSDCardAddr();
+        const csd = try self.getCSD(addr);
+
+        if (!csd.isClass10Card() or !csd.canEraseSingleBlock())
+            return Error.Unsupported;
+
+        const blocks = try csd.getBlocks();
+
+        return .{ .addr = addr, .bus_dev = self, .Blocks512 = blocks, .BlockSize = csd.getBlockSize() };
+    }
+
+    fn getSDCardAddr(self: *const SDMMC) Error!u16 {
+        _ = try self.getCommandResponse(.ALL_SEND_CID, 0x0);
+        switch (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
+            .r6 => |*v| {
+                return v.rsa;
             },
-            else => return 0,
+            else => unreachable,
         }
-        return 0;
     }
 
-    fn configure(self: SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
+    fn selectSDCard(self: *const SDMMC, addr: u16) !void {
+        _ = try self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16);
+    }
+
+    fn configure(self: *const SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
         rcc.enablePeriphery(self.rcc_switch);
         mpu.udelay(100);
         const ref_clock_hz = self.getRefClockHz();
@@ -423,7 +548,7 @@ const UART = struct {
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
 
-    fn getReg(self: UART, reg: Reg) BusType {
+    fn getReg(self: *const UART, reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
     }
     const ClockSource = enum { HSI }; // TODO: add support for other clock sources
@@ -443,13 +568,9 @@ const UART = struct {
     const BaudRate = enum(u32) { B115200 = 115200 };
     const Prescaler = enum(u8) { NoPrescale = 0, Prescale2 = 1, Prescale4 = 2, Prescale6 = 3, Prescale8 = 4, Prescale10 = 5, Prescale12 = 6, Prescale16 = 7, Prescale32 = 8, Prescale64 = 9, Prescale128 = 10, Prescale256 = 11 };
 
-    fn getPeriphEnablerField(self: UART) Field {
-        return .{ .reg = self.getReg(.CR1), .shift = 0, .width = 1 };
-    }
-
-    fn setDataBits(self: UART, bits: DataBits) void {
-        const m0 = Field{ .reg = self.getReg(.CR1), .shift = 12, .width = 1 };
-        const m1 = Field{ .reg = self.getReg(.CR1), .shift = 28, .width = 1 };
+    fn setDataBits(self: *const UART, bits: DataBits) void {
+        const m0: Field = .{ .reg = self.getReg(.CR1), .shift = 12, .width = 1 };
+        const m1: Field = .{ .reg = self.getReg(.CR1), .shift = 28, .width = 1 };
         switch (bits) {
             .SevenDataBits => {
                 m0.set(0);
@@ -466,10 +587,10 @@ const UART = struct {
         }
     }
 
-    pub fn write(self: UART, bytes: []const u8) usize {
-        const txfnf = Field{ .reg = self.getReg(.ISR), .shift = 7, .width = 1 };
+    pub fn write(self: *const UART, bytes: []const u8) usize {
+        const txfnf: Field = .{ .reg = self.getReg(.ISR), .shift = 7, .width = 1 };
         const fifo_full = 0;
-        const tdr = Field{ .reg = self.getReg(.TDR), .shift = 0, .width = 8 };
+        const tdr: Field = .{ .reg = self.getReg(.TDR), .shift = 0, .width = 8 };
         for (bytes) |byte| {
             while (txfnf.get() == fifo_full) {}
             tdr.set(byte);
@@ -477,11 +598,12 @@ const UART = struct {
         return bytes.len;
     }
 
-    pub fn configure(self: UART, clock_source: ClockSource, baud_rate: BaudRate, data_bits: DataBits, parity: Parity, stop_bits: StopBits) void {
-        rcc.setMuxerValue(self.mux, self.resolveClockSource(clock_source));
+    pub fn configure(self: *const UART, clock_source: ClockSource, baud_rate: BaudRate, data_bits: DataBits, parity: Parity, stop_bits: StopBits) void {
+        rcc.setMuxerValue(&self.mux, self.resolveClockSource(clock_source));
         rcc.enablePeriphery(self.rcc_switch);
 
-        self.getPeriphEnablerField().set(0);
+        const uart_enable: Field = .{ .reg = self.getReg(.CR1), .shift = 0, .width = 1 };
+        uart_enable.set(0);
         self.setDataBits(data_bits);
         const cr1 = self.getReg(.CR1);
         (Field{ .reg = cr1, .shift = 15, .width = 1 }).set(@intFromEnum(Oversamling.Oversampling8));
@@ -496,7 +618,7 @@ const UART = struct {
         const baud = @intFromEnum(baud_rate);
         const brr: u32 = ((2 * src_clock_fq / prescaler) + (baud / 2)) / baud;
         (Field{ .reg = self.getReg(.BRR), .shift = 0, .width = 16 }).set((brr & 0xFFF0) + ((brr & 0x0F) >> 1));
-        self.getPeriphEnablerField().set(1);
+        uart_enable.set(1);
     }
 
     fn translateClockSource(own: ClockSource) RCC.ClockSource {
@@ -505,7 +627,7 @@ const UART = struct {
         };
     }
 
-    fn resolveClockSource(self: UART, clock_source: ClockSource) u3 {
+    fn resolveClockSource(self: *const UART, clock_source: ClockSource) u3 {
         return switch (self.idx) {
             4 => switch (clock_source) {
                 .HSI => 2,
@@ -518,24 +640,24 @@ const UART = struct {
 const DDR = struct {
     ctrl_port: BusType,
     phyc_port: BusType,
-    fn getCtrlReg(self: DDR, comptime reg: CtrlReg) BusType {
+    fn getCtrlReg(self: *const DDR, comptime reg: CtrlReg) BusType {
         return @intFromEnum(reg) + self.ctrl_port;
     }
-    fn getPhycReg(self: DDR, comptime reg: PhycReg) BusType {
+    fn getPhycReg(self: *const DDR, comptime reg: PhycReg) BusType {
         return @intFromEnum(reg) + self.phyc_port;
     }
-    fn setCtrlRegs(self: DDR, pairs: []const *const RegValues.CtrlRegValues.Pair) void {
+    fn setCtrlRegs(self: *const DDR, pairs: []const *const RegValues.CtrlRegValues.Pair) void {
         for (pairs) |reg_value| {
             @as(*volatile BusType, @ptrFromInt(self.ctrl_port + @intFromEnum(reg_value.reg))).* = reg_value.value;
         }
     }
-    fn setPhycRegs(self: DDR, pairs: []const *const RegValues.PhycRegValues.Pair) void {
+    fn setPhycRegs(self: *const DDR, pairs: []const *const RegValues.PhycRegValues.Pair) void {
         for (pairs) |reg_value| {
             @as(*volatile BusType, @ptrFromInt(self.phyc_port + @intFromEnum(reg_value.reg))).* = reg_value.value;
         }
     }
 
-    pub fn configure(self: DDR, comptime reg_values: RegValues) bool {
+    pub fn configure(self: *const DDR, comptime reg_values: RegValues) bool {
         pll2.enable(.R);
         const ddritfcr = rcc.getReg(.DDRITFCR);
         (Field{ .reg = ddritfcr, .shift = 8, .width = 1 }).set(0); // AXIDCGEN
@@ -593,15 +715,15 @@ const DDR = struct {
         if (!self.phyInitWait())
             return false;
 
-        const dfi_init_complete_en = Field{ .reg = self.getCtrlReg(.DFIMISC), .shift = 0, .width = 1 };
+        const dfi_init_complete_en: Field = .{ .reg = self.getCtrlReg(.DFIMISC), .shift = 0, .width = 1 };
         self.startSwDone();
         dfi_init_complete_en.set(1);
         self.waitSwDone();
 
         self.normalOpModeWait();
-        const dis_auto_refresh = Field{ .reg = self.getCtrlReg(.RFSHCTL3), .shift = 0, .width = 1 };
-        const selfref_en = Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 0, .width = 1 };
-        const powerdown_en = Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 1, .width = 1 };
+        const dis_auto_refresh: Field = .{ .reg = self.getCtrlReg(.RFSHCTL3), .shift = 0, .width = 1 };
+        const selfref_en: Field = .{ .reg = self.getCtrlReg(.PWRCTL), .shift = 0, .width = 1 };
+        const powerdown_en: Field = .{ .reg = self.getCtrlReg(.PWRCTL), .shift = 1, .width = 1 };
 
         const dis_auto_refresh_value = dis_auto_refresh.get();
         const selfref_en_value = selfref_en.get();
@@ -654,9 +776,9 @@ const DDR = struct {
         return true;
     }
 
-    fn normalOpModeWait(self: DDR) void {
-        const operating_mode = Field{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 0, .width = 3 };
-        const selfref_type = Field{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 4, .width = 2 };
+    fn normalOpModeWait(self: *const DDR) void {
+        const operating_mode: Field = .{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 0, .width = 3 };
+        const selfref_type: Field = .{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 4, .width = 2 };
         while (true) {
             if (operating_mode.get() == 1) // Normal
                 return;
@@ -665,23 +787,23 @@ const DDR = struct {
         }
     }
 
-    fn startSwDone(self: DDR) void {
+    fn startSwDone(self: *const DDR) void {
         (Field{ .reg = self.getCtrlReg(.SWCTL), .shift = 0, .width = 1 }).set(0); // SW_DONE
     }
-    fn waitSwDone(self: DDR) void {
+    fn waitSwDone(self: *const DDR) void {
         (Field{ .reg = self.getCtrlReg(.SWCTL), .shift = 0, .width = 1 }).set(1); // SW_DONE
-        const sw_done_ack = Field{ .reg = self.getCtrlReg(.SWSTAT), .rw = .ReadOnly, .shift = 0, .width = 1 };
+        const sw_done_ack: Field = .{ .reg = self.getCtrlReg(.SWSTAT), .rw = .ReadOnly, .shift = 0, .width = 1 };
         while (sw_done_ack.isCleared()) {}
     }
 
-    fn phyInitWait(self: DDR) bool {
+    fn phyInitWait(self: *const DDR) bool {
         const pgsr = self.getPhycReg(PhycReg.PGSR);
-        const dterr = Field{ .reg = pgsr, .shift = 5, .width = 1 };
-        const dtierr = Field{ .reg = pgsr, .shift = 6, .width = 1 };
-        const dfterr = Field{ .reg = pgsr, .shift = 7, .width = 1 };
-        const dverr = Field{ .reg = pgsr, .shift = 8, .width = 1 };
-        const dvierr = Field{ .reg = pgsr, .shift = 9, .width = 1 };
-        const idone = Field{ .reg = pgsr, .shift = 0, .width = 1 };
+        const dterr: Field = .{ .reg = pgsr, .shift = 5, .width = 1 };
+        const dtierr: Field = .{ .reg = pgsr, .shift = 6, .width = 1 };
+        const dfterr: Field = .{ .reg = pgsr, .shift = 7, .width = 1 };
+        const dverr: Field = .{ .reg = pgsr, .shift = 8, .width = 1 };
+        const dvierr: Field = .{ .reg = pgsr, .shift = 9, .width = 1 };
+        const idone: Field = .{ .reg = pgsr, .shift = 0, .width = 1 };
         while (true) {
             if (dterr.isAsserted() or dtierr.isAsserted() or dfterr.isAsserted() or dverr.isAsserted() or dvierr.isAsserted())
                 return false;
@@ -811,14 +933,14 @@ const MPU = struct {
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL1 = 2, PLL1DIV = 3 };
     const PLL1Divider = enum(u3) { Div1 = 0, Div2 = 1, Div4 = 2, Div8 = 3, Div16 = 4 };
 
-    pub fn configure(self: MPU, clock_source: ClockSource, pll1_div: ?PLL1Divider) void {
-        rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+    pub fn configure(self: *const MPU, clock_source: ClockSource, pll1_div: ?PLL1Divider) void {
+        rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         if (clock_source == .PLL1DIV or clock_source == .PLL1)
             pll1.enable(.P);
         if (clock_source == .PLL1DIV) {
             const divr = rcc.getReg(.MPCKDIVR);
             (Field{ .reg = divr, .shift = 0, .width = 3 }).set(@intFromEnum(pll1_div orelse .Div1));
-            const rdy = Field{ .reg = divr, .shift = 31, .width = 1 };
+            const rdy: Field = .{ .reg = divr, .shift = 31, .width = 1 };
             while (rdy.isCleared()) {}
         }
     }
@@ -830,14 +952,23 @@ const MPU = struct {
         );
         return value;
     }
-    pub fn udelay(self: MPU, usec: u32) void {
+    pub fn udelay(self: *const MPU, usec: u32) void {
         asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
         asm volatile ("mrc p15, 0, r0, c9, c12, 1; orr r0, r0, #0x80000000; mcr p15, 0, r0, c9, c12, 1;" ::: "r0"); // enable cycle counter
         const delay = self.getSystemClockHz() / 1_000_000 * usec;
         while (readCycleCounter() < delay) {}
     }
-    pub fn getSystemClockHz(self: MPU) BusType {
-        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(self.mux)))) {
+    pub fn resetUsCounter(self: *const MPU) void {
+        _ = self;
+        asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
+    }
+    pub fn readUsCounter(self: *const MPU) u32 {
+        _ = self;
+        return readCycleCounter();
+    }
+
+    pub fn getSystemClockHz(self: *const MPU) BusType {
+        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
             .HSI => rcc.getOutputFrequency(.HSI),
             .HSE => rcc.getOutputFrequency(.HSE),
             .PLL1 => pll1.getOutputFrequency(.P),
@@ -850,8 +981,8 @@ const AXI = struct {
     mux: RCC.ClockMuxer,
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL2 = 2, Gated };
     const Output = enum { ACLK, HCLK5, HCLK6, PCLK4, PCLK5 };
-    pub fn configure(self: AXI, clock_source: ClockSource, prescaler: u3, apb4div: u3, apb5div: u3) void {
-        rcc.setMuxerValue(self.mux, @intFromEnum(clock_source));
+    pub fn configure(self: *const AXI, clock_source: ClockSource, prescaler: u3, apb4div: u3, apb5div: u3) void {
+        rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         if (clock_source == .PLL2)
             pll2.enable(.P);
         (Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 0, .width = 3 }).set(prescaler);
@@ -861,8 +992,8 @@ const AXI = struct {
         (Field{ .reg = rcc.getReg(.APB5DIVR), .shift = 0, .width = 3 }).set(apb5div);
         while ((Field{ .reg = rcc.getReg(.APB5DIVR), .shift = 31, .width = 1 }).isCleared()) {}
     }
-    pub fn getOutputFrequency(self: AXI, output: Output) BusType {
-        var ref_clock_hz: BusType = switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(self.mux)))) {
+    pub fn getOutputFrequency(self: *const AXI, output: Output) BusType {
+        var ref_clock_hz: BusType = switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
             .HSI => rcc.getOutputFrequency(.HSI),
             .HSE => rcc.getOutputFrequency(.HSE),
             .PLL2 => pll2.getOutputFrequency(.P),
@@ -901,16 +1032,17 @@ const PLL = struct {
     mux: RCC.ClockMuxer,
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, CSI = 2 }; // TODO: support enum I2S_CKIN = 3
     const Output = enum(FieldShiftType) { P = 4, Q = 5, R = 6 };
-    pub fn configure(self: PLL, clock_source: ?ClockSource, m: u6, n: u9, fracv: u13, p: u7, q: u7, r: u7) void {
+    pub fn configure(self: *const PLL, comptime clock_source: ?ClockSource, m: u6, n: u9, fracv: u13, p: u7, q: u7, r: u7) void {
         if (clock_source) |src| {
-            rcc.setMuxerValue(self.mux, @intFromEnum(src));
+            rcc.setMuxerValue(&self.mux, @intFromEnum(src));
         }
+
         const cfg1r = rcc.getReg(self.cfg1r);
         const cfg2r = rcc.getReg(self.cfg2r);
         const fracr = rcc.getReg(self.fracr);
-        const fracle = Field{ .reg = fracr, .shift = 16, .width = 1 };
+        const fracle: Field = .{ .reg = fracr, .shift = 16, .width = 1 };
         const cr = rcc.getReg(self.cr);
-        const pllrdy = Field{ .reg = cr, .shift = 1, .width = 1, .rw = .ReadOnly };
+        const pllrdy: Field = .{ .reg = cr, .shift = 1, .width = 1, .rw = .ReadOnly };
         (Field{ .reg = cfg1r, .shift = 16, .width = 6 }).set(m);
         (Field{ .reg = cfg1r, .shift = 0, .width = 9 }).set(n);
         fracle.set(0);
@@ -922,13 +1054,13 @@ const PLL = struct {
         (Field{ .reg = cr, .shift = 0, .width = 1 }).set(1); // PLLON
         while (pllrdy.isCleared()) {}
     }
-    pub fn enable(self: PLL, output: Output) void {
+    pub fn enable(self: *const PLL, output: Output) void {
         (Field{ .reg = rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).set(1);
     }
-    fn isOutputEnabled(self: PLL, output: Output) bool {
+    fn isOutputEnabled(self: *const PLL, output: Output) bool {
         return (Field{ .reg = rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).isAsserted();
     }
-    pub fn getOutputFrequency(self: PLL, output: Output) BusType {
+    pub fn getOutputFrequency(self: *const PLL, output: Output) BusType {
         if (!self.isOutputEnabled(output))
             return 0;
         const divm = (Field{ .reg = rcc.getReg(self.cfg1r), .shift = 16, .width = 6 }).get();
@@ -939,7 +1071,7 @@ const PLL = struct {
             .Q => (Field{ .reg = rcc.getReg(self.cfg2r), .shift = 8, .width = 7 }).get(),
             .R => (Field{ .reg = rcc.getReg(self.cfg2r), .shift = 16, .width = 7 }).get(),
         };
-        const ref_fq_hz = switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(self.mux)))) {
+        const ref_fq_hz = switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
             .HSI => rcc.getOutputFrequency(.HSI),
             .HSE => rcc.getOutputFrequency(.HSE),
             .CSI => rcc.getOutputFrequency(.CSI),
@@ -963,8 +1095,8 @@ const TZC = struct {
     pub fn initSecureDDRAccess(self: TZC) void {
         rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 11 }); // TZC1EN
         rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZC2EN
-        const openreq_flt0 = Field{ .reg = self.getReg(.GATE_KEEPER), .shift = 0, .width = 1 };
-        const openreq_flt1 = Field{ .reg = self.getReg(.GATE_KEEPER), .shift = 1, .width = 1 };
+        const openreq_flt0: Field = .{ .reg = self.getReg(.GATE_KEEPER), .shift = 0, .width = 1 };
+        const openreq_flt1: Field = .{ .reg = self.getReg(.GATE_KEEPER), .shift = 1, .width = 1 };
         openreq_flt0.set(0); // Open
         openreq_flt1.set(0); // Open
         (Field{ .reg = self.getReg(.ID_ACCESS0), .shift = 0, .width = 16 }).set(0xFFFF); // NSAID_WR_EN
@@ -981,7 +1113,7 @@ const TZC = struct {
 
 const RCC = struct {
     port: BusType,
-    fn getReg(self: RCC, reg: Reg) BusType {
+    fn getReg(self: *const RCC, reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
     }
     const ClockSource = enum { HSI, HSE, CSI };
@@ -1002,13 +1134,13 @@ const RCC = struct {
 
     const HSEMode = enum { Crystal };
 
-    pub fn enableHSE(self: RCC, mode: HSEMode, fq: u32) void {
+    pub fn enableHSE(self: *const RCC, mode: HSEMode, fq: u32) void {
         hse_fq_hz = fq;
         switch (mode) {
             .Crystal => {
                 const ocenclrr = self.getReg(.OCENCLRR);
                 (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> Off
-                const hserdy = Field{ .reg = self.getReg(.OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
+                const hserdy: Field = .{ .reg = self.getReg(.OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
                 while (hserdy.isAsserted()) {}
                 (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 10, .width = 1 }).set(1); // HSEBYP -> Off
                 (Field{ .reg = self.getReg(.OCENSETR), .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> On
@@ -1017,15 +1149,15 @@ const RCC = struct {
         }
     }
 
-    fn getOutputFrequency(self: RCC, clock: ClockSource) u32 {
+    fn getOutputFrequency(self: *const RCC, clock: ClockSource) u32 {
         const ocrdyr = self.getReg(.OCRDYR);
         const ocensetr = self.getReg(.OCENSETR);
         switch (clock) {
             .HSI => {
                 if ((Field{ .reg = ocensetr, .shift = 0, .width = 1 }).isCleared())
                     return 0;
-                const hsirdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 0, .width = 1 };
-                const hsidivrdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 2, .width = 1 };
+                const hsirdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 0, .width = 1 };
+                const hsidivrdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 2, .width = 1 };
                 while (hsirdy.isCleared()) {}
                 while (hsidivrdy.isCleared()) {}
                 const hsi_div: u2 = @truncate((Field{ .reg = self.getReg(.HSICFGR), .shift = 0, .width = 2 }).get());
@@ -1034,38 +1166,38 @@ const RCC = struct {
             .HSE => {
                 if ((Field{ .reg = ocensetr, .shift = 8, .width = 1 }).isCleared())
                     return 0;
-                const hserdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 8, .width = 1 };
+                const hserdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 8, .width = 1 };
                 while (hserdy.isCleared()) {}
                 return hse_fq_hz;
             },
             .CSI => {
                 if ((Field{ .reg = ocensetr, .shift = 4, .width = 1 }).isCleared())
                     return 0;
-                const csirdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 4, .width = 1 };
+                const csirdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 4, .width = 1 };
                 while (csirdy.isCleared()) {}
                 return csi_fq_hz;
             },
         }
     }
 
-    fn setMuxerValue(self: RCC, mux: ClockMuxer, value: BusType) void {
+    fn setMuxerValue(self: *const RCC, mux: *const ClockMuxer, value: BusType) void {
         (Field{ .reg = self.getReg(mux.src.reg), .shift = mux.src.shift, .width = mux.src.width }).set(value);
         if (mux.rdy) |rdy| {
             while ((Field{ .reg = self.getReg(rdy.reg), .shift = rdy.shift, .width = 1 }).isCleared()) {}
         }
     }
-    fn getMuxerValue(self: RCC, mux: ClockMuxer) BusType {
+    fn getMuxerValue(self: *const RCC, mux: *const ClockMuxer) BusType {
         if (mux.rdy) |rdy| {
             while ((Field{ .reg = self.getReg(rdy.reg), .shift = rdy.shift, .width = 1 }).isCleared()) {}
         }
         return (Field{ .reg = self.getReg(mux.src.reg), .shift = mux.src.shift, .width = mux.src.width }).get();
     }
 
-    fn enablePeriphery(self: RCC, periph_switch: PeripherySwitch) void {
+    fn enablePeriphery(self: *const RCC, periph_switch: PeripherySwitch) void {
         (Field{ .reg = self.getReg(periph_switch.set_reg), .rw = .WriteOnly, .shift = periph_switch.shift, .width = 1 }).set(1);
     }
 
-    fn disablePeriphery(self: RCC, periph_switch: PeripherySwitch) void {
+    fn disablePeriphery(self: *const RCC, periph_switch: PeripherySwitch) void {
         if (periph_switch.clr_reg) |clr_reg| {
             (Field{ .reg = self.getReg(clr_reg), .rw = .WriteOnly, .shift = periph_switch.shift, .width = 1 }).set(1);
         }
@@ -1123,7 +1255,7 @@ const RCC = struct {
 const GPIO = struct {
     port: BusType,
     rcc_switch: RCC.PeripherySwitch,
-    fn getReg(self: GPIO, reg: Reg) BusType {
+    fn getReg(self: *const GPIO, reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
     }
     const Reg = enum(BusType) {
@@ -1140,15 +1272,15 @@ const GPIO = struct {
     const OSPEED = enum(u2) { Low = 0, Medium = 1, High = 2, VeryHigh = 3 };
     const PUPD = enum(u2) { Disabled = 0, PullUp = 1, PullDown = 2, Reserved = 3 };
 
-    pub fn pin(self: GPIO, nr: u4) Pin {
+    pub fn pin(self: *const GPIO, nr: u4) Pin {
         return .{ .gpio = self, .pin = nr };
     }
 
     const Pin = struct {
-        gpio: GPIO,
+        gpio: *const GPIO,
         pin: u4,
 
-        pub fn configure(self: Pin, mode: MODE, otype: OTYPE, ospeed: OSPEED, pupd: PUPD, af: u4) void {
+        pub fn configure(self: *const Pin, mode: MODE, otype: OTYPE, ospeed: OSPEED, pupd: PUPD, af: u4) void {
             if (mode == .AltFunc)
                 rcc.enablePeriphery(self.gpio.rcc_switch);
             self.getMODER().set(@intFromEnum(mode));
