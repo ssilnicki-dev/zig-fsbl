@@ -267,7 +267,7 @@ const SDMMC = struct {
         };
     };
 
-    fn getCommandResponse(self: *const SDMMC, cmd: Command, arg: u32) Command.RetType {
+    fn getCommandResponse(self: *const SDMMC, comptime cmd: Command, arg: u32) Command.RetType {
         if (cmd == .SELECT_DESELECT_CARD)
             @constCast(self).app_cmd_addr = arg;
 
@@ -279,7 +279,7 @@ const SDMMC = struct {
         }
 
         const cmdr = self.getReg(.CMDR);
-        const cpsmen = Field{ .reg = cmdr, .shift = 12, .width = 1 };
+        const cpsmen: Field = .{ .reg = cmdr, .shift = 12, .width = 1 };
 
         if (cpsmen.isAsserted())
             (Register{ .addr = cmdr }).reset();
@@ -293,13 +293,13 @@ const SDMMC = struct {
         (Field{ .reg = cmdr, .shift = 0, .width = 6 }).set(@intFromEnum(cmd));
         cpsmen.set(1);
         const star = self.getReg(.STAR);
-        const ctimeout = Field{ .reg = star, .shift = 2, .width = 1, .rw = .ReadOnly };
-        const ccrfail = Field{ .reg = star, .shift = 0, .width = 1, .rw = .ReadOnly };
-        const cmdrend = Field{ .reg = star, .shift = 6, .width = 1, .rw = .ReadOnly };
-        const cmdsent = Field{ .reg = star, .shift = 7, .width = 1, .rw = .ReadOnly };
-        const dtimeout = Field{ .reg = star, .shift = 3, .width = 1, .rw = .ReadOnly };
-        const busyd0 = Field{ .reg = star, .shift = 20, .width = 1, .rw = .ReadOnly };
-        const busyd0end = Field{ .reg = star, .shift = 21, .width = 1, .rw = .ReadOnly };
+        const ctimeout: Field = .{ .reg = star, .shift = 2, .width = 1, .rw = .ReadOnly };
+        const ccrfail: Field = .{ .reg = star, .shift = 0, .width = 1, .rw = .ReadOnly };
+        const cmdrend: Field = .{ .reg = star, .shift = 6, .width = 1, .rw = .ReadOnly };
+        const cmdsent: Field = .{ .reg = star, .shift = 7, .width = 1, .rw = .ReadOnly };
+        const dtimeout: Field = .{ .reg = star, .shift = 3, .width = 1, .rw = .ReadOnly };
+        const busyd0: Field = .{ .reg = star, .shift = 20, .width = 1, .rw = .ReadOnly };
+        const busyd0end: Field = .{ .reg = star, .shift = 21, .width = 1, .rw = .ReadOnly };
 
         var timeout_us: i32 = 10_000;
         const system_ticks_per_us = mpu.getSystemClockHz() / 1_000_000;
@@ -333,11 +333,11 @@ const SDMMC = struct {
             else => {},
         }
 
-        const respr1r = Register{ .addr = self.getReg(.RESP1R) };
-        const respr2r = Register{ .addr = self.getReg(.RESP2R) };
-        const respr3r = Register{ .addr = self.getReg(.RESP3R) };
-        const respr4r = Register{ .addr = self.getReg(.RESP4R) };
-        const respcmdr = (Field{ .reg = self.getReg(.RESPCMDR), .shift = 0, .width = 6, .rw = .ReadOnly });
+        const respr1r: Register = .{ .addr = self.getReg(.RESP1R) };
+        const respr2r: Register = .{ .addr = self.getReg(.RESP2R) };
+        const respr3r: Register = .{ .addr = self.getReg(.RESP3R) };
+        const respr4r: Register = .{ .addr = self.getReg(.RESP4R) };
+        const respcmdr: Field = .{ .reg = self.getReg(.RESPCMDR), .shift = 0, .width = 6, .rw = .ReadOnly };
         switch (stuff.ret) {
             .empty => {},
             .r7, .r3 => |*value| value.* = respr1r.get(),
@@ -598,13 +598,9 @@ const UART = struct {
     const BaudRate = enum(u32) { B115200 = 115200 };
     const Prescaler = enum(u8) { NoPrescale = 0, Prescale2 = 1, Prescale4 = 2, Prescale6 = 3, Prescale8 = 4, Prescale10 = 5, Prescale12 = 6, Prescale16 = 7, Prescale32 = 8, Prescale64 = 9, Prescale128 = 10, Prescale256 = 11 };
 
-    fn getPeriphEnablerField(self: *const UART) Field {
-        return .{ .reg = self.getReg(.CR1), .shift = 0, .width = 1 };
-    }
-
     fn setDataBits(self: *const UART, bits: DataBits) void {
-        const m0 = Field{ .reg = self.getReg(.CR1), .shift = 12, .width = 1 };
-        const m1 = Field{ .reg = self.getReg(.CR1), .shift = 28, .width = 1 };
+        const m0: Field = .{ .reg = self.getReg(.CR1), .shift = 12, .width = 1 };
+        const m1: Field = .{ .reg = self.getReg(.CR1), .shift = 28, .width = 1 };
         switch (bits) {
             .SevenDataBits => {
                 m0.set(0);
@@ -622,9 +618,9 @@ const UART = struct {
     }
 
     pub fn write(self: *const UART, bytes: []const u8) usize {
-        const txfnf = Field{ .reg = self.getReg(.ISR), .shift = 7, .width = 1 };
+        const txfnf: Field = .{ .reg = self.getReg(.ISR), .shift = 7, .width = 1 };
         const fifo_full = 0;
-        const tdr = Field{ .reg = self.getReg(.TDR), .shift = 0, .width = 8 };
+        const tdr: Field = .{ .reg = self.getReg(.TDR), .shift = 0, .width = 8 };
         for (bytes) |byte| {
             while (txfnf.get() == fifo_full) {}
             tdr.set(byte);
@@ -636,7 +632,8 @@ const UART = struct {
         rcc.setMuxerValue(&self.mux, self.resolveClockSource(clock_source));
         rcc.enablePeriphery(self.rcc_switch);
 
-        self.getPeriphEnablerField().set(0);
+        const uart_enable: Field = .{ .reg = self.getReg(.CR1), .shift = 0, .width = 1 };
+        uart_enable.set(0);
         self.setDataBits(data_bits);
         const cr1 = self.getReg(.CR1);
         (Field{ .reg = cr1, .shift = 15, .width = 1 }).set(@intFromEnum(Oversamling.Oversampling8));
@@ -651,7 +648,7 @@ const UART = struct {
         const baud = @intFromEnum(baud_rate);
         const brr: u32 = ((2 * src_clock_fq / prescaler) + (baud / 2)) / baud;
         (Field{ .reg = self.getReg(.BRR), .shift = 0, .width = 16 }).set((brr & 0xFFF0) + ((brr & 0x0F) >> 1));
-        self.getPeriphEnablerField().set(1);
+        uart_enable.set(1);
     }
 
     fn translateClockSource(own: ClockSource) RCC.ClockSource {
@@ -748,15 +745,15 @@ const DDR = struct {
         if (!self.phyInitWait())
             return false;
 
-        const dfi_init_complete_en = Field{ .reg = self.getCtrlReg(.DFIMISC), .shift = 0, .width = 1 };
+        const dfi_init_complete_en: Field = .{ .reg = self.getCtrlReg(.DFIMISC), .shift = 0, .width = 1 };
         self.startSwDone();
         dfi_init_complete_en.set(1);
         self.waitSwDone();
 
         self.normalOpModeWait();
-        const dis_auto_refresh = Field{ .reg = self.getCtrlReg(.RFSHCTL3), .shift = 0, .width = 1 };
-        const selfref_en = Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 0, .width = 1 };
-        const powerdown_en = Field{ .reg = self.getCtrlReg(.PWRCTL), .shift = 1, .width = 1 };
+        const dis_auto_refresh: Field = .{ .reg = self.getCtrlReg(.RFSHCTL3), .shift = 0, .width = 1 };
+        const selfref_en: Field = .{ .reg = self.getCtrlReg(.PWRCTL), .shift = 0, .width = 1 };
+        const powerdown_en: Field = .{ .reg = self.getCtrlReg(.PWRCTL), .shift = 1, .width = 1 };
 
         const dis_auto_refresh_value = dis_auto_refresh.get();
         const selfref_en_value = selfref_en.get();
@@ -810,8 +807,8 @@ const DDR = struct {
     }
 
     fn normalOpModeWait(self: *const DDR) void {
-        const operating_mode = Field{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 0, .width = 3 };
-        const selfref_type = Field{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 4, .width = 2 };
+        const operating_mode: Field = .{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 0, .width = 3 };
+        const selfref_type: Field = .{ .reg = self.getCtrlReg(.STAT), .rw = .ReadOnly, .shift = 4, .width = 2 };
         while (true) {
             if (operating_mode.get() == 1) // Normal
                 return;
@@ -825,18 +822,18 @@ const DDR = struct {
     }
     fn waitSwDone(self: *const DDR) void {
         (Field{ .reg = self.getCtrlReg(.SWCTL), .shift = 0, .width = 1 }).set(1); // SW_DONE
-        const sw_done_ack = Field{ .reg = self.getCtrlReg(.SWSTAT), .rw = .ReadOnly, .shift = 0, .width = 1 };
+        const sw_done_ack: Field = .{ .reg = self.getCtrlReg(.SWSTAT), .rw = .ReadOnly, .shift = 0, .width = 1 };
         while (sw_done_ack.isCleared()) {}
     }
 
     fn phyInitWait(self: *const DDR) bool {
         const pgsr = self.getPhycReg(PhycReg.PGSR);
-        const dterr = Field{ .reg = pgsr, .shift = 5, .width = 1 };
-        const dtierr = Field{ .reg = pgsr, .shift = 6, .width = 1 };
-        const dfterr = Field{ .reg = pgsr, .shift = 7, .width = 1 };
-        const dverr = Field{ .reg = pgsr, .shift = 8, .width = 1 };
-        const dvierr = Field{ .reg = pgsr, .shift = 9, .width = 1 };
-        const idone = Field{ .reg = pgsr, .shift = 0, .width = 1 };
+        const dterr: Field = .{ .reg = pgsr, .shift = 5, .width = 1 };
+        const dtierr: Field = .{ .reg = pgsr, .shift = 6, .width = 1 };
+        const dfterr: Field = .{ .reg = pgsr, .shift = 7, .width = 1 };
+        const dverr: Field = .{ .reg = pgsr, .shift = 8, .width = 1 };
+        const dvierr: Field = .{ .reg = pgsr, .shift = 9, .width = 1 };
+        const idone: Field = .{ .reg = pgsr, .shift = 0, .width = 1 };
         while (true) {
             if (dterr.isAsserted() or dtierr.isAsserted() or dfterr.isAsserted() or dverr.isAsserted() or dvierr.isAsserted())
                 return false;
@@ -973,7 +970,7 @@ const MPU = struct {
         if (clock_source == .PLL1DIV) {
             const divr = rcc.getReg(.MPCKDIVR);
             (Field{ .reg = divr, .shift = 0, .width = 3 }).set(@intFromEnum(pll1_div orelse .Div1));
-            const rdy = Field{ .reg = divr, .shift = 31, .width = 1 };
+            const rdy: Field = .{ .reg = divr, .shift = 31, .width = 1 };
             while (rdy.isCleared()) {}
         }
     }
@@ -1065,16 +1062,17 @@ const PLL = struct {
     mux: RCC.ClockMuxer,
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, CSI = 2 }; // TODO: support enum I2S_CKIN = 3
     const Output = enum(FieldShiftType) { P = 4, Q = 5, R = 6 };
-    pub fn configure(self: *const PLL, clock_source: ?ClockSource, m: u6, n: u9, fracv: u13, p: u7, q: u7, r: u7) void {
+    pub fn configure(self: *const PLL, comptime clock_source: ?ClockSource, m: u6, n: u9, fracv: u13, p: u7, q: u7, r: u7) void {
         if (clock_source) |src| {
             rcc.setMuxerValue(&self.mux, @intFromEnum(src));
         }
+
         const cfg1r = rcc.getReg(self.cfg1r);
         const cfg2r = rcc.getReg(self.cfg2r);
         const fracr = rcc.getReg(self.fracr);
-        const fracle = Field{ .reg = fracr, .shift = 16, .width = 1 };
+        const fracle: Field = .{ .reg = fracr, .shift = 16, .width = 1 };
         const cr = rcc.getReg(self.cr);
-        const pllrdy = Field{ .reg = cr, .shift = 1, .width = 1, .rw = .ReadOnly };
+        const pllrdy: Field = .{ .reg = cr, .shift = 1, .width = 1, .rw = .ReadOnly };
         (Field{ .reg = cfg1r, .shift = 16, .width = 6 }).set(m);
         (Field{ .reg = cfg1r, .shift = 0, .width = 9 }).set(n);
         fracle.set(0);
@@ -1127,8 +1125,8 @@ const TZC = struct {
     pub fn initSecureDDRAccess(self: TZC) void {
         rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 11 }); // TZC1EN
         rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZC2EN
-        const openreq_flt0 = Field{ .reg = self.getReg(.GATE_KEEPER), .shift = 0, .width = 1 };
-        const openreq_flt1 = Field{ .reg = self.getReg(.GATE_KEEPER), .shift = 1, .width = 1 };
+        const openreq_flt0: Field = .{ .reg = self.getReg(.GATE_KEEPER), .shift = 0, .width = 1 };
+        const openreq_flt1: Field = .{ .reg = self.getReg(.GATE_KEEPER), .shift = 1, .width = 1 };
         openreq_flt0.set(0); // Open
         openreq_flt1.set(0); // Open
         (Field{ .reg = self.getReg(.ID_ACCESS0), .shift = 0, .width = 16 }).set(0xFFFF); // NSAID_WR_EN
@@ -1172,7 +1170,7 @@ const RCC = struct {
             .Crystal => {
                 const ocenclrr = self.getReg(.OCENCLRR);
                 (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> Off
-                const hserdy = Field{ .reg = self.getReg(.OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
+                const hserdy: Field = .{ .reg = self.getReg(.OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
                 while (hserdy.isAsserted()) {}
                 (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 10, .width = 1 }).set(1); // HSEBYP -> Off
                 (Field{ .reg = self.getReg(.OCENSETR), .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> On
@@ -1188,8 +1186,8 @@ const RCC = struct {
             .HSI => {
                 if ((Field{ .reg = ocensetr, .shift = 0, .width = 1 }).isCleared())
                     return 0;
-                const hsirdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 0, .width = 1 };
-                const hsidivrdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 2, .width = 1 };
+                const hsirdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 0, .width = 1 };
+                const hsidivrdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 2, .width = 1 };
                 while (hsirdy.isCleared()) {}
                 while (hsidivrdy.isCleared()) {}
                 const hsi_div: u2 = @truncate((Field{ .reg = self.getReg(.HSICFGR), .shift = 0, .width = 2 }).get());
@@ -1198,14 +1196,14 @@ const RCC = struct {
             .HSE => {
                 if ((Field{ .reg = ocensetr, .shift = 8, .width = 1 }).isCleared())
                     return 0;
-                const hserdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 8, .width = 1 };
+                const hserdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 8, .width = 1 };
                 while (hserdy.isCleared()) {}
                 return hse_fq_hz;
             },
             .CSI => {
                 if ((Field{ .reg = ocensetr, .shift = 4, .width = 1 }).isCleared())
                     return 0;
-                const csirdy = Field{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 4, .width = 1 };
+                const csirdy: Field = .{ .reg = ocrdyr, .rw = .ReadOnly, .shift = 4, .width = 1 };
                 while (csirdy.isCleared()) {}
                 return csi_fq_hz;
             },
