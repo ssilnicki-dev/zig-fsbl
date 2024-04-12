@@ -146,19 +146,28 @@ const SDMMC = struct {
     rcc_switch: RCC.PeripherySwitch,
     app_cmd_addr: u32 = 0,
 
+    pub const Error = error{
+        MediaError,
+        BusError,
+        NoMedia,
+        Unsupported,
+        Busy,
+        Timeout,
+        BusTimeout,
+        CRCError,
+        AppCmdError,
+    };
+
+    pub const MediaType = enum {
+        SDSC,
+        SDHC,
+        eMMC,
+    };
+
     fn getReg(self: *const SDMMC, reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
     }
     const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
-    pub const MediaType = enum {
-        MediaError,
-        BusError,
-        NoMedia,
-        SDSC,
-        SDHC,
-        eMMC,
-        Unsupported,
-    };
 
     pub fn setClockSource(self: *const SDMMC, clock_source: ClockSource) void {
         rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
@@ -178,6 +187,7 @@ const SDMMC = struct {
             .HSI => rcc.getOutputFrequency(.HSI),
         };
     }
+
     fn getPowerCtrl(self: *const SDMMC) Field {
         return Field{ .reg = self.getReg(.POWER), .shift = 0, .width = 2 };
     }
@@ -210,8 +220,8 @@ const SDMMC = struct {
         SEND_STATUS = 13,
         SD_SEND_OP_COND = 41 + app_cmd_flag,
         APP_CMD = 55,
-        fn getStuff(self: Command) struct { timeout: BusType = 0, ret: RetType } {
-            return switch (self) {
+        fn getStuff(comptime self: Command) struct { ret: RetType, timeout: BusType = 0 } {
+            return comptime switch (self) {
                 .GO_IDLE_STATE => .{ .ret = .empty },
                 .SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
                 .ALL_SEND_CID => .{ .ret = .{ .r2 = undefined } },
@@ -248,13 +258,6 @@ const SDMMC = struct {
             r3: u32,
             r6: struct { cmd_idx: u6, rsa: u16, card_status: u16 },
             r7: u32, // TODO: redefine response fields
-            err: enum {
-                Busy,
-                Timeout,
-                BusTimeout,
-                CRCError,
-                AppCmdError,
-            },
             empty: void,
             fn getRespType(self: RetType) RespType {
                 return switch (self) {
@@ -267,16 +270,12 @@ const SDMMC = struct {
         };
     };
 
-    fn getCommandResponse(self: *const SDMMC, comptime cmd: Command, arg: u32) Command.RetType {
+    fn getCommandResponse(self: *const SDMMC, comptime cmd: Command, arg: u32) Error!Command.RetType {
         if (cmd == .SELECT_DESELECT_CARD)
             @constCast(self).app_cmd_addr = arg;
 
-        if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag) {
-            switch (self.getCommandResponse(.APP_CMD, self.app_cmd_addr)) {
-                .r1 => {},
-                else => return .{ .err = .AppCmdError },
-            }
-        }
+        if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag)
+            _ = try (self.getCommandResponse(.APP_CMD, self.app_cmd_addr));
 
         const cmdr = self.getReg(.CMDR);
         const cpsmen: Field = .{ .reg = cmdr, .shift = 12, .width = 1 };
@@ -285,8 +284,8 @@ const SDMMC = struct {
             (Register{ .addr = cmdr }).reset();
         (Register{ .addr = self.getReg(.DCTRL) }).reset();
         var stuff = cmd.getStuff();
-        const resp_tpye = stuff.ret.getRespType();
-        (Field{ .reg = cmdr, .shift = 8, .width = 2 }).set(@intFromEnum(resp_tpye));
+        const resp_type = stuff.ret.getRespType();
+        (Field{ .reg = cmdr, .shift = 8, .width = 2 }).set(@intFromEnum(resp_type));
         (Register{ .addr = self.getReg(.DTIMER) }).set(stuff.timeout);
         self.clearInterrupts();
         (Register{ .addr = self.getReg(.ARGR) }).set(arg);
@@ -306,12 +305,12 @@ const SDMMC = struct {
         while (true) {
             mpu.resetUsCounter();
             if (timeout_us <= 0)
-                return .{ .err = .Timeout };
+                return Error.Timeout;
             if (ctimeout.isAsserted())
-                return .{ .err = .BusTimeout };
-            if (resp_tpye != .NoResponse) {
-                if ((resp_tpye == .ShortWithCRC or resp_tpye == .LongWithCRC) and ccrfail.isAsserted())
-                    return .{ .err = .CRCError };
+                return Error.BusTimeout;
+            if (resp_type != .NoResponse) {
+                if ((resp_type == .ShortWithCRC or resp_type == .LongWithCRC) and ccrfail.isAsserted())
+                    return Error.CRCError;
                 if (cmdrend.isAsserted())
                     break;
             } else if (cmdsent.isAsserted())
@@ -325,7 +324,7 @@ const SDMMC = struct {
                     while (busyd0end.isCleared()) {
                         mpu.resetUsCounter();
                         if (timeout_us <= 0 or dtimeout.isAsserted())
-                            return .{ .err = .Timeout };
+                            return Error.Timeout;
                         timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
                     }
                 }
@@ -344,7 +343,6 @@ const SDMMC = struct {
             .r6 => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .rsa = @truncate(respr1r.get() >> 16), .card_status = @truncate(respr1r.get()) },
             .r2 => |*value| value.* = (@as(u128, respr4r.get()) << 0) + (@as(u128, respr3r.get()) << 32) + (@as(u128, respr2r.get()) << 64) + (@as(u128, respr1r.get()) << 96),
             .r1, .r1b => |*value| value.* = .{ .cmd_idx = @truncate(respcmdr.get()), .card_status = .{ .status = respr1r.get() } },
-            else => unreachable,
         }
         return stuff.ret;
     }
@@ -354,47 +352,45 @@ const SDMMC = struct {
         (@as(*volatile BusType, @ptrFromInt(self.getReg(.ICR)))).* |= clear_mask;
     }
 
-    pub fn getMediaType(self: *const SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) MediaType {
+    pub fn getMediaType(self: *const SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) Error!MediaType {
         self.configure(400_000, .SDR, .Default1Bit, .PowerSaveOn);
 
-        if (self.getCommandResponse(.GO_IDLE_STATE, 0) != .empty)
-            return .BusError;
+        _ = try self.getCommandResponse(.GO_IDLE_STATE, 0);
 
         // try detect SD Card
-        switch (self.getCommandResponse(.SEND_IF_COND, 0x1AA)) {
-            .r7 => |*value| {
-                if ((value.* & 0x1FF) != 0x1AA) {
-                    return .NoMedia;
-                } // TODO: shall we support v.1 ????
-            },
-            else => {
-                // try detect eMMC
-                switch (self.getCommandResponse(.SEND_OP_COND, 0x0)) {
-                    .r3 => return .eMMC,
-                    else => return .NoMedia,
-                }
-            },
+        if (self.getCommandResponse(.SEND_IF_COND, 0x1AA)) |ret| {
+            switch (ret) {
+                .r7 => |*v| {
+                    if ((v.* & 0x1FF) != 0x1AA)
+                        return Error.NoMedia; // TODO: shall we support v.1 ????
+                },
+                else => unreachable,
+            }
+        } else |err| {
+            _ = &err;
+            _ = try self.getCommandResponse(.SEND_OP_COND, 0x0);
+            return MediaType.eMMC;
         }
+
         // try setup ~3v SDHC
         var retries: u16 = 1_000;
         while (retries != 0) {
-            switch (self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) { // HCS, 2.9-3.4 V
-                .r3 => |*value| {
-                    const v = value.*;
-                    if ((v & (1 << 31)) == (1 << 31)) { // only when Busy bit is set
-                        if (v & 0x3E0000 == 0x0)
-                            return .Unsupported;
-                        if (v & 0x40000000 != 0x0)
-                            return .SDHC;
-                        return .SDSC;
+            switch (try self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) {
+                .r3 => |*v| {
+                    if ((v.* & (1 << 31)) == (1 << 31)) { // only when Busy bit is set
+                        if (v.* & 0x3E0000 == 0x0)
+                            return Error.Unsupported;
+                        if (v.* & 0x40000000 != 0x0)
+                            return MediaType.SDHC;
+                        return MediaType.SDSC;
                     }
                 },
-                else => return .MediaError,
+                else => unreachable,
             }
             retries -= 1;
             mpu.udelay(1000);
         }
-        return .NoMedia;
+        return Error.NoMedia;
     }
 
     const CSD = struct {
@@ -407,23 +403,23 @@ const SDMMC = struct {
             const csd: u128 = self.value;
             return @as(u64, 1) << @as(u4, @truncate(csd >> 80));
         }
-        fn getBlocks(self: *const CSD) union(enum) { blocks512: u64, unsupported: void } {
+        fn getBlocks(self: *const CSD) Error!u64 {
             const csd: u128 = self.value;
             switch (@as(u2, @truncate(csd >> 126))) {
                 0x0 => { // Version 1.0
                     const c_size: u12 = @truncate(csd >> 62);
                     const c_size_mult: u3 = @truncate(csd >> 47);
-                    return .{ .blocks512 = (@as(u64, c_size) + 1) * (@as(u64, 1) << (@as(u6, c_size_mult) + 2)) * self.getBlockSize() / 512 };
+                    return (@as(u64, c_size) + 1) * (@as(u64, 1) << (@as(u6, c_size_mult) + 2)) * self.getBlockSize() / 512;
                 },
                 0x1 => { // Version 2.0
                     const c_size: u22 = @truncate(csd >> 48);
-                    return .{ .blocks512 = @as(u64, c_size) * 1024 * 512 / 512 };
+                    return @as(u64, c_size) * 1024 * 512 / 512;
                 },
                 0x2 => { // Version 3.0
                     const c_size: u28 = @truncate(csd >> 48);
-                    return .{ .blocks512 = @as(u64, c_size) * 1024 * 512 / 512 };
+                    return @as(u64, c_size) * 1024 * 512 / 512;
                 },
-                else => return .unsupported,
+                else => return Error.Unsupported,
             }
         }
         fn canEraseSingleBlock(self: *const CSD) bool {
@@ -432,10 +428,10 @@ const SDMMC = struct {
         }
     };
 
-    fn getCSD(self: *const SDMMC, addr: u16) union(enum) { csd: CSD, err: void } {
-        switch (self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)) {
-            .r2 => |*csd| return .{ .csd = .{ .value = csd.* } },
-            else => return .err,
+    fn getCSD(self: *const SDMMC, addr: u16) Error!CSD {
+        switch (try self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)) {
+            .r2 => |*csd| return .{ .value = csd.* },
+            else => unreachable,
         }
     }
 
@@ -445,82 +441,56 @@ const SDMMC = struct {
         addr: u16,
         bus_dev: *const SDMMC,
         const CardState = Command.RetType.CardStatus.CardState;
-        pub fn getState(self: *const Card) union(enum) { state: CardState, err: void } {
-            return switch (self.bus_dev.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
-                .r1 => |*resp| .{ .state = resp.card_status.getState() },
-                else => .err,
+        pub fn getState(self: *const Card) Error!CardState {
+            return switch (try self.bus_dev.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
+                .r1 => |*resp| resp.card_status.getState(),
+                else => unreachable,
             };
         }
-        pub fn select(self: *const Card) bool {
-            switch (self.getState()) {
-                .err => return false,
-                .state => |*state| {
-                    switch (state.*) {
-                        .Transfer => return true,
-                        else => {},
-                    }
-                },
+        pub fn select(self: *const Card) Error!void {
+            switch (try self.getState()) {
+                .Transfer => return,
+                else => {},
             }
-            if (!self.bus_dev.selectSDCard(self.addr))
-                return false;
+            try self.bus_dev.selectSDCard(self.addr);
 
             var retries: i32 = 10;
             while (retries > 0) {
                 mpu.udelay(1000);
-                switch (self.getState()) {
-                    .err => return false,
-                    .state => |*state| {
-                        switch (state.*) {
-                            .Transfer => return true,
-                            else => continue,
-                        }
-                    },
+                switch (try self.getState()) {
+                    .Transfer => return,
+                    else => continue,
                 }
                 retries -= 1;
             }
-            return false;
+            return Error.Busy;
         }
     };
 
-    pub fn getCard(self: *const SDMMC) union(enum) { card: Card, err: void, unsupported: void } {
-        const addr = self.getSDCardAddr();
-        if (addr == 0x0)
-            return .err;
+    pub fn getCard(self: *const SDMMC) Error!Card {
+        const addr = try self.getSDCardAddr();
+        const csd = try self.getCSD(addr);
 
-        switch (self.getCSD(addr)) {
-            .err => return .err,
-            .csd => |*csd| {
-                if (!csd.isClass10Card() or !csd.canEraseSingleBlock())
-                    return .unsupported;
-                switch (csd.getBlocks()) {
-                    .unsupported => return .unsupported,
-                    .blocks512 => |*blocks| {
-                        return .{ .card = .{ .addr = addr, .bus_dev = self, .Blocks512 = blocks.*, .BlockSize = csd.getBlockSize() } };
-                    },
-                }
-            },
-        }
-        return .err;
+        if (!csd.isClass10Card() or !csd.canEraseSingleBlock())
+            return Error.Unsupported;
+
+        const blocks = try csd.getBlocks();
+
+        return .{ .addr = addr, .bus_dev = self, .Blocks512 = blocks, .BlockSize = csd.getBlockSize() };
     }
 
-    fn getSDCardAddr(self: *const SDMMC) u16 {
-        switch (self.getCommandResponse(.ALL_SEND_CID, 0x0)) {
-            .r2 => {}, // FIXME: unused CID result
-            else => return 0,
-        }
-        switch (self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
-            .r6 => |*value| {
-                return value.rsa;
+    fn getSDCardAddr(self: *const SDMMC) Error!u16 {
+        _ = try self.getCommandResponse(.ALL_SEND_CID, 0x0);
+        switch (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
+            .r6 => |*v| {
+                return v.rsa;
             },
-            else => return 0,
+            else => unreachable,
         }
-        return 0;
     }
-    fn selectSDCard(self: *const SDMMC, addr: u16) bool {
-        return switch (self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16)) {
-            .r1b => true,
-            else => false,
-        };
+
+    fn selectSDCard(self: *const SDMMC, addr: u16) !void {
+        _ = try self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16);
     }
 
     fn configure(self: *const SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {

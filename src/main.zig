@@ -17,7 +17,7 @@ fn writer(nt: @TypeOf(void{})) Writer {
     return .{ .context = nt };
 }
 
-export fn main() u8 {
+export fn main() void {
     // RCC init
     bus.rcc.enableHSE(.Crystal, 24_000_000);
 
@@ -48,25 +48,20 @@ export fn main() u8 {
 
     bus.pll4.configure(.HSE, 1, 49, 0, 2, 6, 7); // 200 MHz for SDMMC 1 & 2
     bus.sdmmc1.setClockSource(.PLL4);
-    const sd1_media_type = bus.sdmmc1.getMediaType(.Performance);
 
-    switch (sd1_media_type) {
-        .SDHC => {
-            switch (bus.sdmmc1.getCard()) {
-                .card => |*card| {
-                    if (card.BlockSize > 0 and card.Blocks512 > 0)
-                        led.reset();
-                    bus.mpu.udelay(400000);
-                },
-                else => {},
-            }
+    const media = bus.sdmmc1.getMediaType(.Performance) catch return;
+
+    switch (media) {
+        .SDHC, .SDSC => {
+            const card = bus.sdmmc1.getCard() catch return;
+            if (card.BlockSize > 0 and card.Blocks512 > 0)
+                led.reset();
+            bus.mpu.udelay(400_000);
+            card.select() catch return;
+            led.assert();
         },
         else => {},
     }
-
-    led.assert();
-
-    return 0;
 }
 
 const ddr_reg_values = @TypeOf(bus.ddr).RegValues{
