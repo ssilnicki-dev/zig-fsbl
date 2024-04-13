@@ -1,4 +1,4 @@
-const bus = @import("regmap.zig");
+const bus = @import("stm32mp157c.zig");
 const std = @import("std");
 const led = bus.gpioa.pin(13);
 
