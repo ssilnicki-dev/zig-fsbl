@@ -224,6 +224,7 @@ const SDMMC = struct {
         SEND_IF_COND = 8,
         SEND_CSD = 9,
         SEND_STATUS = 13,
+        SET_BUS_WIDTH = 6 + app_cmd_flag,
         SD_SEND_OP_COND = 41 + app_cmd_flag,
         APP_CMD = 55,
         fn getStuff(comptime self: Command) struct { ret: RetType, timeout: BusType = 0 } {
@@ -236,6 +237,7 @@ const SDMMC = struct {
                 .SEND_IF_COND => .{ .ret = .{ .r7 = undefined } },
                 .SEND_CSD => .{ .ret = .{ .r2 = undefined } },
                 .SEND_STATUS => .{ .ret = .{ .r1 = undefined } },
+                .SET_BUS_WIDTH => .{ .ret = .{ .r1 = undefined } },
                 .SD_SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
                 .APP_CMD => .{ .ret = .{ .r1 = undefined } },
             };
@@ -472,6 +474,16 @@ const SDMMC = struct {
             }
             return Error.Busy;
         }
+
+        const SDBusWidth = enum(u2) {
+            Default1Bit = 0,
+            Wide4Bit = 2,
+        };
+        pub fn set4bitBusMode(self: Card) Error!void {
+            try self.select();
+            _ = try self.sdmmc.getCommandResponse(.SET_BUS_WIDTH, @intFromEnum(SDBusWidth.Wide4Bit));
+            self.sdmmc.configure(self.sdmmc.getBusClockHz(), .SDR, .Wide4Bit, .PowerSaveOn);
+        }
     };
 
     pub fn getCard(self: *SDMMC) Error!Card {
@@ -498,6 +510,13 @@ const SDMMC = struct {
 
     fn selectSDCard(self: *SDMMC, addr: u16) Error!void {
         _ = try self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16);
+    }
+
+    fn getBusClockHz(self: *SDMMC) BusType {
+        var divider = (self.getClockDivField().get() * 2);
+        if (divider == 0)
+            divider = 1;
+        return self.getRefClockHz() / divider;
     }
 
     fn configure(self: *SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
