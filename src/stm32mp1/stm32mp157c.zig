@@ -147,15 +147,10 @@ const SDMMC = struct {
     app_cmd_addr: u32 = 0,
 
     pub const Error = error{
-        MediaError,
-        BusError,
-        NoMedia,
         Unsupported,
         Busy,
         Timeout,
-        BusTimeout,
         CRCError,
-        AppCmdError,
     };
 
     pub const MediaType = enum {
@@ -307,7 +302,7 @@ const SDMMC = struct {
             if (timeout_us <= 0)
                 return Error.Timeout;
             if (ctimeout.isAsserted())
-                return Error.BusTimeout;
+                return Error.Timeout;
             if (resp_type != .NoResponse) {
                 if ((resp_type == .ShortWithCRC or resp_type == .LongWithCRC) and ccrfail.isAsserted())
                     return Error.CRCError;
@@ -362,7 +357,7 @@ const SDMMC = struct {
             switch (ret) {
                 .r7 => |*v| {
                     if ((v.* & 0x1FF) != 0x1AA)
-                        return Error.NoMedia; // TODO: shall we support v.1 ????
+                        return Error.Unsupported; // TODO: shall we support v.1 ????
                 },
                 else => unreachable,
             }
@@ -390,7 +385,7 @@ const SDMMC = struct {
             retries -= 1;
             mpu.udelay(1000);
         }
-        return Error.NoMedia;
+        return Error.Unsupported;
     }
 
     const CSD = struct {
@@ -489,7 +484,7 @@ const SDMMC = struct {
         }
     }
 
-    fn selectSDCard(self: *const SDMMC, addr: u16) !void {
+    fn selectSDCard(self: *const SDMMC, addr: u16) Error!void {
         _ = try self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16);
     }
 
