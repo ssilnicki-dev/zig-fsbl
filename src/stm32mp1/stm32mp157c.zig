@@ -153,7 +153,7 @@ const SDMMC = struct {
         CRCError,
     };
 
-    pub const MediaType = enum {
+    const MediaType = enum {
         SDSC,
         SDHC,
         eMMC,
@@ -361,7 +361,7 @@ const SDMMC = struct {
         (@as(*volatile BusType, @ptrFromInt(self.getReg(.ICR)))).* |= clear_mask;
     }
 
-    pub fn getMediaType(self: *SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) Error!MediaType {
+    fn getMediaType(self: *SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) Error!MediaType {
         self.configure(400_000, .SDR, .Default1Bit, .PowerSaveOn);
 
         _ = try self.getCommandResponse(.GO_IDLE_STATE, 0);
@@ -486,7 +486,10 @@ const SDMMC = struct {
         }
     };
 
-    pub fn getCard(self: *SDMMC) Error!Card {
+    pub fn getSDCard(self: *SDMMC) Error!Card {
+        if (try getMediaType(self, .PowerSave) == .eMMC)
+            return Error.Unsupported;
+
         const addr = try self.getSDCardAddr();
         const csd = try self.getCSD(addr);
 

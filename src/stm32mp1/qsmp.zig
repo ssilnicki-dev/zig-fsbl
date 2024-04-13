@@ -49,19 +49,12 @@ export fn main() void {
     bus.pll4.configure(.HSE, 1, 49, 0, 2, 6, 7); // 200 MHz for SDMMC 1 & 2
     bus.sdmmc1.setClockSource(.PLL4);
 
-    const media = bus.sdmmc1.getMediaType(.Performance) catch return;
-
-    switch (media) {
-        .SDHC, .SDSC => {
-            const card = bus.sdmmc1.getCard() catch return;
-            if (card.BlockSize > 0 and card.Blocks512 > 0)
-                led.reset();
-            card.set4bitBusMode() catch return;
-            bus.mpu.udelay(400_000);
-            led.assert();
-        },
-        else => {},
-    }
+    const card = bus.sdmmc1.getSDCard() catch return;
+    if (card.BlockSize > 0 and card.Blocks512 > 0)
+        led.reset();
+    card.set4bitBusMode() catch return;
+    bus.mpu.udelay(400_000);
+    led.assert();
 }
 
 const ddr_reg_values = @TypeOf(bus.ddr).RegValues{
