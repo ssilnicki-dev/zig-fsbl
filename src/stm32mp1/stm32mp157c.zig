@@ -186,14 +186,21 @@ const SDMMC = struct {
     fn getPowerCtrl(self: *const SDMMC) Field {
         return Field{ .reg = self.getReg(.POWER), .shift = 0, .width = 2 };
     }
+
+    const PowerState = enum(u2) {
+        Off = 0,
+        Cycle = 2,
+        On = 3,
+    };
+
     fn powerCycle(self: *const SDMMC) void {
-        self.getPowerCtrl().set(2); // PowerCycle
+        self.getPowerCtrl().set(@intFromEnum(PowerState.Cycle));
         mpu.udelay(2000);
-        self.getPowerCtrl().set(0); // PowerOff
+        self.getPowerCtrl().set(@intFromEnum(PowerState.Off));
         mpu.udelay(2000);
     }
     fn powerOn(self: *const SDMMC) void {
-        self.getPowerCtrl().set(3); // PowerOn
+        self.getPowerCtrl().set(@intFromEnum(PowerState.On));
         mpu.udelay(2000);
     }
 
