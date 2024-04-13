@@ -56,8 +56,8 @@ export fn main() void {
             const card = bus.sdmmc1.getCard() catch return;
             if (card.BlockSize > 0 and card.Blocks512 > 0)
                 led.reset();
+            card.set4bitBusMode() catch return;
             bus.mpu.udelay(400_000);
-            card.select() catch return;
             led.assert();
         },
         else => {},
