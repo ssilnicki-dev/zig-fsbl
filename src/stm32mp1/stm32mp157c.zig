@@ -77,7 +77,7 @@ pub const mpu = bus.mpu;
 pub const axi = bus.axi;
 pub const tzc = bus.apb5.tzc;
 pub const ddr = bus.apb4.ddr;
-pub const sdmmc1 = bus.ahb6.sdmmc1;
+pub var sdmmc1 = bus.ahb6.sdmmc1;
 pub const sdmmc2 = bus.ahb6.sdmmc2;
 
 // pripheries private aliasing
@@ -159,12 +159,12 @@ const SDMMC = struct {
         eMMC,
     };
 
-    fn getReg(self: *const SDMMC, reg: Reg) BusType {
+    fn getReg(self: *SDMMC, reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
     }
     const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
 
-    pub fn setClockSource(self: *const SDMMC, clock_source: ClockSource) void {
+    pub fn setClockSource(self: *SDMMC, clock_source: ClockSource) void {
         rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         switch (clock_source) {
             .PLL3 => pll3.enable(.R),
@@ -173,7 +173,7 @@ const SDMMC = struct {
         }
     }
 
-    fn getRefClockHz(self: *const SDMMC) BusType {
+    fn getRefClockHz(self: *SDMMC) BusType {
         return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
             .Off => 0,
             .HCLK6 => axi.getOutputFrequency(.HCLK6),
@@ -183,7 +183,11 @@ const SDMMC = struct {
         };
     }
 
-    fn getPowerCtrl(self: *const SDMMC) Field {
+    fn getClockDivField(self: *SDMMC) Field {
+        return Field{ .reg = self.getReg(.CLKCR), .shift = 0, .width = 10 };
+    }
+
+    fn getPowerCtrlField(self: *SDMMC) Field {
         return Field{ .reg = self.getReg(.POWER), .shift = 0, .width = 2 };
     }
 
@@ -193,14 +197,14 @@ const SDMMC = struct {
         On = 3,
     };
 
-    fn powerCycle(self: *const SDMMC) void {
-        self.getPowerCtrl().set(@intFromEnum(PowerState.Cycle));
+    fn powerCycle(self: *SDMMC) void {
+        self.getPowerCtrlField().set(@intFromEnum(PowerState.Cycle));
         mpu.udelay(2000);
-        self.getPowerCtrl().set(@intFromEnum(PowerState.Off));
+        self.getPowerCtrlField().set(@intFromEnum(PowerState.Off));
         mpu.udelay(2000);
     }
-    fn powerOn(self: *const SDMMC) void {
-        self.getPowerCtrl().set(@intFromEnum(PowerState.On));
+    fn powerOn(self: *SDMMC) void {
+        self.getPowerCtrlField().set(@intFromEnum(PowerState.On));
         mpu.udelay(2000);
     }
 
@@ -272,9 +276,10 @@ const SDMMC = struct {
         };
     };
 
-    fn getCommandResponse(self: *const SDMMC, comptime cmd: Command, arg: u32) Error!Command.RetType {
-        if (cmd == .SELECT_DESELECT_CARD)
-            @constCast(self).app_cmd_addr = arg;
+    fn getCommandResponse(self: *SDMMC, comptime cmd: Command, arg: u32) Error!Command.RetType {
+        if (cmd == .SELECT_DESELECT_CARD) {
+            self.app_cmd_addr = arg;
+        }
 
         if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag)
             _ = try (self.getCommandResponse(.APP_CMD, self.app_cmd_addr));
@@ -349,12 +354,12 @@ const SDMMC = struct {
         return stuff.ret;
     }
 
-    fn clearInterrupts(self: *const SDMMC) void {
+    fn clearInterrupts(self: *SDMMC) void {
         const clear_mask: BusType = 0x1FE00FFF; // all bits
         (@as(*volatile BusType, @ptrFromInt(self.getReg(.ICR)))).* |= clear_mask;
     }
 
-    pub fn getMediaType(self: *const SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) Error!MediaType {
+    pub fn getMediaType(self: *SDMMC, power_mode: enum(BusType) { PowerSave = 0, Performance = 1 << 28 }) Error!MediaType {
         self.configure(400_000, .SDR, .Default1Bit, .PowerSaveOn);
 
         _ = try self.getCommandResponse(.GO_IDLE_STATE, 0);
@@ -430,7 +435,7 @@ const SDMMC = struct {
         }
     };
 
-    fn getCSD(self: *const SDMMC, addr: u16) Error!CSD {
+    fn getCSD(self: *SDMMC, addr: u16) Error!CSD {
         switch (try self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)) {
             .r2 => |*csd| return .{ .value = csd.* },
             else => unreachable,
@@ -441,20 +446,20 @@ const SDMMC = struct {
         BlockSize: u64 = 0,
         Blocks512: u64 = 0,
         addr: u16,
-        bus_dev: *const SDMMC,
+        sdmmc: *SDMMC,
         const CardState = Command.RetType.CardStatus.CardState;
         pub fn getState(self: *const Card) Error!CardState {
-            return switch (try self.bus_dev.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
+            return switch (try self.sdmmc.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
                 .r1 => |*resp| resp.card_status.getState(),
                 else => unreachable,
             };
         }
-        pub fn select(self: *const Card) Error!void {
+        fn select(self: *const Card) Error!void {
             switch (try self.getState()) {
                 .Transfer => return,
                 else => {},
             }
-            try self.bus_dev.selectSDCard(self.addr);
+            try self.sdmmc.selectSDCard(self.addr);
 
             var retries: i32 = 10;
             while (retries > 0) {
@@ -469,7 +474,7 @@ const SDMMC = struct {
         }
     };
 
-    pub fn getCard(self: *const SDMMC) Error!Card {
+    pub fn getCard(self: *SDMMC) Error!Card {
         const addr = try self.getSDCardAddr();
         const csd = try self.getCSD(addr);
 
@@ -478,10 +483,10 @@ const SDMMC = struct {
 
         const blocks = try csd.getBlocks();
 
-        return .{ .addr = addr, .bus_dev = self, .Blocks512 = blocks, .BlockSize = csd.getBlockSize() };
+        return .{ .addr = addr, .sdmmc = self, .Blocks512 = blocks, .BlockSize = csd.getBlockSize() };
     }
 
-    fn getSDCardAddr(self: *const SDMMC) Error!u16 {
+    fn getSDCardAddr(self: *SDMMC) Error!u16 {
         _ = try self.getCommandResponse(.ALL_SEND_CID, 0x0);
         switch (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
             .r6 => |*v| {
@@ -491,11 +496,11 @@ const SDMMC = struct {
         }
     }
 
-    fn selectSDCard(self: *const SDMMC, addr: u16) Error!void {
+    fn selectSDCard(self: *SDMMC, addr: u16) Error!void {
         _ = try self.getCommandResponse(.SELECT_DESELECT_CARD, @as(BusType, addr) << 16);
     }
 
-    fn configure(self: *const SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
+    fn configure(self: *SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
         rcc.enablePeriphery(self.rcc_switch);
         mpu.udelay(100);
         const ref_clock_hz = self.getRefClockHz();
@@ -503,7 +508,7 @@ const SDMMC = struct {
             return;
         self.powerCycle();
         const clkcr = self.getReg(.CLKCR);
-        (Field{ .reg = clkcr, .shift = 0, .width = 10 }).set(ref_clock_hz / (bus_clock_hz * 2)); // CLKDIV
+        self.getClockDivField().set(ref_clock_hz / (bus_clock_hz * 2)); // CLKDIV
         (Field{ .reg = clkcr, .shift = 18, .width = 1 }).set(@intFromEnum(mode));
         if (bus_clock_hz <= 50_000_000) {
             (Field{ .reg = clkcr, .shift = 19, .width = 1 }).set(@intFromEnum(BusSpeed.UpTo50MHz));
