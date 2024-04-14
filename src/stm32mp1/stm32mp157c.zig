@@ -312,7 +312,7 @@ const SDMMC = struct {
         var timeout_us: i32 = 10_000;
         const system_ticks_per_us = mpu.getSystemClockHz() / 1_000_000;
         while (true) {
-            mpu.resetUsCounter();
+            mpu.resetCycleCounter();
             if (timeout_us <= 0)
                 return Error.Timeout;
             if (ctimeout.isAsserted())
@@ -324,17 +324,17 @@ const SDMMC = struct {
                     break;
             } else if (cmdsent.isAsserted())
                 break;
-            timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
+            timeout_us -= @intCast(@max(1, mpu.readCycleCounter() / system_ticks_per_us));
         }
         switch (stuff.ret) {
             .r1b => {
                 if (busyd0.isAsserted()) {
                     timeout_us = 2_000_000;
                     while (busyd0end.isCleared()) {
-                        mpu.resetUsCounter();
+                        mpu.resetCycleCounter();
                         if (timeout_us <= 0 or dtimeout.isAsserted())
                             return Error.Timeout;
-                        timeout_us -= @intCast(@max(1, mpu.readUsCounter() / system_ticks_per_us));
+                        timeout_us -= @intCast(@max(1, mpu.readCycleCounter() / system_ticks_per_us));
                     }
                 }
             },
@@ -948,7 +948,8 @@ const MPU = struct {
         }
     }
 
-    inline fn readCycleCounter() u32 {
+    pub inline fn readCycleCounter(self: *const MPU) u32 {
+        _ = &self;
         var value: u32 = undefined;
         asm volatile ("mrc p15, 0, %[value], c9, c13, 0"
             : [value] "=r" (value),
@@ -956,18 +957,14 @@ const MPU = struct {
         return value;
     }
     pub fn udelay(self: *const MPU, usec: u32) void {
+        self.resetCycleCounter();
+        const delay = self.getSystemClockHz() / 1_000_000 * usec;
+        while (self.readCycleCounter() < delay) {}
+    }
+    pub inline fn resetCycleCounter(self: *const MPU) void {
+        _ = self;
         asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
         asm volatile ("mrc p15, 0, r0, c9, c12, 1; orr r0, r0, #0x80000000; mcr p15, 0, r0, c9, c12, 1;" ::: "r0"); // enable cycle counter
-        const delay = self.getSystemClockHz() / 1_000_000 * usec;
-        while (readCycleCounter() < delay) {}
-    }
-    pub fn resetUsCounter(self: *const MPU) void {
-        _ = self;
-        asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
-    }
-    pub fn readUsCounter(self: *const MPU) u32 {
-        _ = self;
-        return readCycleCounter();
     }
 
     pub fn getSystemClockHz(self: *const MPU) BusType {
