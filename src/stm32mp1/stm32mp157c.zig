@@ -368,13 +368,8 @@ const SDMMC = struct {
 
         // try detect SD Card
         if (self.getCommandResponse(.SEND_IF_COND, 0x1AA)) |ret| {
-            switch (ret) {
-                .r7 => |*v| {
-                    if ((v.* & 0x1FF) != 0x1AA)
-                        return Error.Unsupported; // TODO: shall we support v.1 ????
-                },
-                else => unreachable,
-            }
+            if (ret.r7 & 0x1FF != 0x1AA)
+                return Error.Unsupported;
         } else |err| {
             _ = &err;
             _ = try self.getCommandResponse(.SEND_OP_COND, 0x0);
@@ -384,17 +379,13 @@ const SDMMC = struct {
         // try setup ~3v SDHC
         var retries: u16 = 1_000;
         while (retries != 0) {
-            switch (try self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))) {
-                .r3 => |*v| {
-                    if ((v.* & (1 << 31)) == (1 << 31)) { // only when Busy bit is set
-                        if (v.* & 0x3E0000 == 0x0)
-                            return Error.Unsupported;
-                        if (v.* & 0x40000000 != 0x0)
-                            return MediaType.SDHC;
-                        return MediaType.SDSC;
-                    }
-                },
-                else => unreachable,
+            const r3 = (try self.getCommandResponse(.SD_SEND_OP_COND, 0x403E0000 | @intFromEnum(power_mode))).r3;
+            if (r3 & (1 << 31) == (1 << 31)) {
+                if (r3 & 0x3E0000 == 0x0)
+                    return Error.Unsupported;
+                if (r3 & 0x40000000 != 0x0)
+                    return MediaType.SDHC;
+                return MediaType.SDSC;
             }
             retries -= 1;
             mpu.udelay(1000);
@@ -438,10 +429,7 @@ const SDMMC = struct {
     };
 
     fn getCSD(self: *SDMMC, addr: u16) Error!CSD {
-        switch (try self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)) {
-            .r2 => |*csd| return .{ .value = csd.* },
-            else => unreachable,
-        }
+        return .{ .value = (try self.getCommandResponse(.SEND_CSD, @as(BusType, addr) << 16)).r2 };
     }
 
     const Card = struct {
@@ -451,25 +439,18 @@ const SDMMC = struct {
         sdmmc: *SDMMC,
         const CardState = Command.RetType.CardStatus.CardState;
         pub fn getState(self: *const Card) Error!CardState {
-            return switch (try self.sdmmc.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)) {
-                .r1 => |*resp| resp.card_status.getState(),
-                else => unreachable,
-            };
+            return (try self.sdmmc.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)).r1.card_status.getState();
         }
         fn select(self: *const Card) Error!void {
-            switch (try self.getState()) {
-                .Transfer => return,
-                else => {},
-            }
+            if ((try self.getState()) == .Transfer)
+                return;
             try self.sdmmc.selectSDCard(self.addr);
 
             var retries: i32 = 10;
             while (retries > 0) {
                 mpu.udelay(1000);
-                switch (try self.getState()) {
-                    .Transfer => return,
-                    else => continue,
-                }
+                if ((try self.getState()) == .Transfer)
+                    return;
                 retries -= 1;
             }
             return Error.Busy;
@@ -503,12 +484,7 @@ const SDMMC = struct {
 
     fn getSDCardAddr(self: *SDMMC) Error!u16 {
         _ = try self.getCommandResponse(.ALL_SEND_CID, 0x0);
-        switch (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)) {
-            .r6 => |*v| {
-                return v.rsa;
-            },
-            else => unreachable,
-        }
+        return (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)).r6.rsa;
     }
 
     fn selectSDCard(self: *SDMMC, addr: u16) Error!void {
