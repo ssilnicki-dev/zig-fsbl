@@ -128,14 +128,28 @@ const Field = struct {
 
 const Register = struct {
     addr: BusType,
-    inline fn reset(self: Register) void {
+    inline fn reset(self: *const Register) void {
         self.set(0x0);
     }
-    fn set(self: Register, value: BusType) void {
+    fn set(self: *const Register, value: BusType) void {
         @as(*volatile BusType, @ptrFromInt(self.addr)).* = value;
     }
-    fn get(self: Register) BusType {
+    fn get(self: *const Register) BusType {
         return @as(*volatile BusType, @ptrFromInt(self.addr)).*;
+    }
+
+    fn monitorBits(self: *const Register, comptime bits: []const FieldShiftType) u5 {
+        comptime if (bits.len == 0)
+            @compileError("Have to specify at least one bit for monitoring");
+
+        var mask: BusType = 0;
+        for (bits) |bit| mask |= @as(@TypeOf(mask), 1) << bit;
+
+        while (true) {
+            const bit = @bitSizeOf(@TypeOf(mask)) - @clz(self.get() & mask);
+            if (bit != 0)
+                return @truncate(bit - 1);
+        }
     }
 };
 // private peripheries implementation
