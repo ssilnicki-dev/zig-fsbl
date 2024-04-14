@@ -252,7 +252,7 @@ const SDMMC = struct {
             const CardStatus = struct {
                 const CardState = enum(u4) { Idle = 0, Ready = 1, Ident = 2, StandBy = 3, Transfer = 4, Data = 5, Receive = 6, Prog = 7, Disabled = 8 };
                 status: u32,
-                pub fn isCardClockedLocked(self: *const CardStatus) bool {
+                pub fn isCardLocked(self: *const CardStatus) bool {
                     return @as(u1, @truncate(self.status >> 25)) == 1;
                 }
                 pub fn getState(self: *const CardStatus) CardState {
@@ -395,13 +395,11 @@ const SDMMC = struct {
 
     const CSD = struct {
         value: u128,
-        fn isClass10Card(self: *const CSD) bool {
-            const csd: u128 = self.value;
-            return @as(u1, @truncate(csd >> 94)) == 1;
+        fn isClass10Card(self: *const CSD) bool { // is CMD6 supported?
+            return @as(u1, @truncate(self.value >> 94)) == 1;
         }
-        fn getBlockSize(self: *const CSD) u64 {
-            const csd: u128 = self.value;
-            return @as(u64, 1) << @as(u4, @truncate(csd >> 80));
+        fn getMaxBlockSize(self: *const CSD) u64 {
+            return @as(u64, 1) << @as(u4, @truncate(self.value >> 80));
         }
         fn getBlocks(self: *const CSD) Error!u64 {
             const csd: u128 = self.value;
@@ -409,7 +407,7 @@ const SDMMC = struct {
                 0x0 => { // Version 1.0
                     const c_size: u12 = @truncate(csd >> 62);
                     const c_size_mult: u3 = @truncate(csd >> 47);
-                    return (@as(u64, c_size) + 1) * (@as(u64, 1) << (@as(u6, c_size_mult) + 2)) * self.getBlockSize() / 512;
+                    return (@as(u64, c_size) + 1) * (@as(u64, 1) << (@as(u6, c_size_mult) + 2)) * self.getMaxBlockSize() / 512;
                 },
                 0x1 => { // Version 2.0
                     const c_size: u22 = @truncate(csd >> 48);
@@ -423,8 +421,7 @@ const SDMMC = struct {
             }
         }
         fn canEraseSingleBlock(self: *const CSD) bool {
-            const csd: u128 = self.value;
-            return @as(u1, @truncate(csd >> 46)) == 1;
+            return @as(u1, @truncate(self.value >> 46)) == 1;
         }
     };
 
@@ -433,8 +430,8 @@ const SDMMC = struct {
     }
 
     const Card = struct {
-        BlockSize: u64 = 0,
-        Blocks512: u64 = 0,
+        max_block_size: u64 = 0,
+        blocks_nr: u64 = 0,
         addr: u16,
         sdmmc: *SDMMC,
         const CardState = Command.RetType.CardStatus.CardState;
@@ -479,7 +476,7 @@ const SDMMC = struct {
 
         const blocks = try csd.getBlocks();
 
-        return .{ .addr = addr, .sdmmc = self, .Blocks512 = blocks, .BlockSize = csd.getBlockSize() };
+        return .{ .addr = addr, .sdmmc = self, .blocks_nr = blocks, .max_block_size = csd.getMaxBlockSize() };
     }
 
     fn getSDCardAddr(self: *SDMMC) Error!u16 {

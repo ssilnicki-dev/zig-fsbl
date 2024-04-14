@@ -50,7 +50,7 @@ export fn main() void {
     bus.sdmmc1.setClockSource(.PLL4);
 
     const card = bus.sdmmc1.getSDCard() catch return;
-    if (card.BlockSize > 0 and card.Blocks512 > 0)
+    if (card.max_block_size > 0 and card.blocks_nr > 0)
         led.reset();
     card.set4bitBusMode() catch return;
     bus.mpu.udelay(400_000);
