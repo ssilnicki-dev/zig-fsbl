@@ -433,6 +433,7 @@ const SDMMC = struct {
         max_block_size: u64 = 0,
         blocks_nr: u64 = 0,
         addr: u16,
+        serial: u32,
         sdmmc: *SDMMC,
         const CardState = Command.RetType.CardStatus.CardState;
         pub fn getState(self: *const Card) Error!CardState {
@@ -468,20 +469,20 @@ const SDMMC = struct {
         if (try getMediaType(self, .PowerSave) == .eMMC)
             return Error.Unsupported;
 
-        const addr = try self.getSDCardAddr();
-        const csd = try self.getCSD(addr);
+        const ids = try self.getSDCardIds();
+        const csd = try self.getCSD(ids.addr);
 
         if (!csd.isClass10Card() or !csd.canEraseSingleBlock())
             return Error.Unsupported;
 
         const blocks = try csd.getBlocks();
 
-        return .{ .addr = addr, .sdmmc = self, .blocks_nr = blocks, .max_block_size = csd.getMaxBlockSize() };
+        return .{ .addr = ids.addr, .serial = ids.serial, .sdmmc = self, .blocks_nr = blocks, .max_block_size = csd.getMaxBlockSize() };
     }
 
-    fn getSDCardAddr(self: *SDMMC) Error!u16 {
-        _ = try self.getCommandResponse(.ALL_SEND_CID, 0x0);
-        return (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)).r6.rsa;
+    fn getSDCardIds(self: *SDMMC) Error!struct { addr: u16, serial: u32 } {
+        const serial: u32 = @truncate((try self.getCommandResponse(.ALL_SEND_CID, 0x0)).r2 >> 24);
+        return .{ .addr = (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)).r6.rsa, .serial = serial };
     }
 
     fn selectSDCard(self: *SDMMC, addr: u16) Error!void {
