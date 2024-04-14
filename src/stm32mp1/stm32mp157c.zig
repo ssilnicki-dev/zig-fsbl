@@ -947,6 +947,39 @@ const MPU = struct {
             while (rdy.isCleared()) {}
         }
     }
+    inline fn getCacheLineSize() u32 {
+        var value: u32 = undefined;
+        asm volatile ("mrc p15, 1, %[value], c0, c0, 0"
+            : [value] "=r" (value),
+        );
+        return @as(u32, 1) << @truncate((value & 0x7) + 4);
+    }
+
+    fn invalidateDataCache(self: *const MPU, data: []u8, clean: bool) void {
+        _ = &self;
+        const cache_line_size = getCacheLineSize();
+
+        var cache_start_addr = @intFromPtr(data.ptr) - @intFromPtr(data.ptr) % cache_line_size;
+        const cache_end_addr = (@intFromPtr(data.ptr) + data.len + cache_line_size - 1) / cache_line_size * cache_line_size;
+
+        if (clean) {
+            while (cache_end_addr >= cache_start_addr) {
+                asm volatile ("mcr p15, 0, %[cache_start_addr], c7, c14, 1"
+                    :
+                    : [cache_start_addr] "r" (cache_start_addr),
+                );
+                cache_start_addr += cache_line_size;
+            }
+        } else {
+            while (cache_end_addr >= cache_start_addr) {
+                asm volatile ("mcr p15, 0, %[cache_start_addr], c7, c6, 1"
+                    :
+                    : [cache_start_addr] "r" (cache_start_addr),
+                );
+                cache_start_addr += cache_line_size;
+            }
+        }
+    }
 
     pub inline fn readCycleCounter(self: *const MPU) u32 {
         _ = &self;
