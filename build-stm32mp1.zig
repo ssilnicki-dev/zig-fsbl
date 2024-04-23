@@ -57,7 +57,8 @@ pub fn build(b: *std.Build) void {
     elf2_run_step.step.dependOn(&copy_bin.step);
     elf2_run_step.addFileArg(qsmp_fsbl_elf.getEmittedBin()); // elf
     elf2_run_step.addFileArg(copy_bin.source); // bin
-    elf2_run_step.addFileArg(.{ .path = copy_bin.dest_builder.exe_dir }); // install path
+    elf2_run_step.addFileArg(.{ .path = b.getInstallPath(copy_bin.dir, "") }); // install path
+
     b.default_step.dependOn(&elf2_run_step.step);
 
     const regmap_unit_tests = b.addTest(.{
