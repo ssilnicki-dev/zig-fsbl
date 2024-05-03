@@ -1,18 +1,19 @@
 const bus = @import("stm32mp157c.zig");
 const std = @import("std");
 const led = bus.gpioa.pin(13);
+const uart = bus.uart4;
 
 const uart_writer = writer(void{});
 pub fn printf(comptime fmt: []const u8, args: anytype) void {
     nosuspend uart_writer.print(fmt, args) catch return;
 }
 
-pub fn stm32mp1_uart4_writer(nt: @TypeOf(void{}), bytes: []const u8) error{}!usize {
+pub fn stm32mp1UartWriter(nt: @TypeOf(void{}), bytes: []const u8) error{}!usize {
     _ = nt;
-    return bus.uart4.write(bytes);
+    return uart.write(bytes);
 }
 
-const Writer = std.io.Writer(@TypeOf(void{}), error{}, stm32mp1_uart4_writer);
+const Writer = std.io.Writer(@TypeOf(void{}), error{}, stm32mp1UartWriter);
 fn writer(nt: @TypeOf(void{})) Writer {
     return .{ .context = nt };
 }
@@ -34,7 +35,7 @@ export fn main() void {
     // UART pins SoC dependant
     bus.gpiob.pin(2).configure(.AltFunc, .PushPull, .High, .PullUp, 8);
     bus.gpiog.pin(11).configure(.AltFunc, .PushPull, .High, .PullUp, 6);
-    bus.uart4.configure(.HSI, .B115200, .EightDataBits, .NoParity, .OneStopBit);
+    uart.configure(.HSI, .B115200, .EightDataBits, .NoParity, .OneStopBit);
     led.configure(.Output, .OpenDrain, .High, .Disabled, 0);
 
     // SDMMC1 - SD
