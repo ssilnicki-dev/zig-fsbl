@@ -18,7 +18,7 @@ fn writer(nt: @TypeOf(void{})) Writer {
     return .{ .context = nt };
 }
 
-export fn main() void {
+pub fn rccMpuAxiDdrInit() void {
     // RCC init
     bus.rcc.enableHSE(.Crystal, 24_000_000);
 
@@ -31,7 +31,9 @@ export fn main() void {
     bus.axi.configure(.PLL2, 0, 1, 2);
     bus.tzc.initSecureDDRAccess();
     _ = bus.ddr.configure(ddr_reg_values);
+}
 
+pub fn peripheryInit() void {
     // UART pins SoC dependant
     bus.gpiob.pin(2).configure(.AltFunc, .PushPull, .High, .PullUp, 8);
     bus.gpiog.pin(11).configure(.AltFunc, .PushPull, .High, .PullUp, 6);
