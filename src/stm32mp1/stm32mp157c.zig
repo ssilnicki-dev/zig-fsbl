@@ -413,7 +413,8 @@ const SDMMC = struct {
             return @as(u1, @truncate(self.value >> 94)) == 1;
         }
         fn getMaxBlockSize(self: *const CSD) u64 {
-            return @as(u64, 1) << @as(u4, @truncate(self.value >> 80));
+            const csd: u128 = self.value >> 80;
+            return @as(u64, 1) << @truncate(csd);
         }
         fn getBlocks(self: *const CSD) Error!u64 {
             const csd: u128 = self.value;
@@ -495,8 +496,9 @@ const SDMMC = struct {
     }
 
     fn getSDCardIds(self: *SDMMC) Error!struct { addr: u16, serial: u32 } {
-        const serial: u32 = @truncate((try self.getCommandResponse(.ALL_SEND_CID, 0x0)).r2 >> 24);
-        return .{ .addr = (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)).r6.rsa, .serial = serial };
+        const serial = (try self.getCommandResponse(.ALL_SEND_CID, 0x0)).r2 >> 24;
+        const rsa = (try self.getCommandResponse(.SEND_RELATIVE_ADDR, 0x0)).r6.rsa;
+        return .{ .addr = rsa, .serial = @truncate(serial) };
     }
 
     fn selectSDCard(self: *SDMMC, addr: u16) Error!void {
@@ -565,7 +567,7 @@ const UART = struct {
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
 
-    fn getReg(self: *const UART, reg: Reg) BusType {
+    fn getReg(self: *const UART, comptime reg: Reg) BusType {
         return self.port + @intFromEnum(reg);
     }
     const ClockSource = enum { HSI }; // TODO: add support for other clock sources
