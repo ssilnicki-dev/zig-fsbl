@@ -29,15 +29,15 @@ pub fn build(b: *std.Build) void {
     };
     const resolver_target = b.resolveTargetQuery(armv7a_target);
 
-    const qsmp_fsbl_elf = b.addExecutable(.{
+    const fsbl_elf = b.addExecutable(.{
         .name = "qsmp-fsbl",
-        .root_source_file = .{ .path = "src/stm32mp1/qsmp.zig" },
+        .root_source_file = .{ .path = "src/stm32mp1/fsbl.zig" },
         .target = resolver_target,
         .optimize = optimize,
     });
+    fsbl_elf.addAssemblyFile(.{ .path = "src/stm32mp1/load.S" });
+    fsbl_elf.setLinkerScript(.{ .path = "src/stm32mp1/linker.ld" });
 
-    qsmp_fsbl_elf.addAssemblyFile(.{ .path = "src/stm32mp1/load.S" });
-    qsmp_fsbl_elf.setLinkerScript(.{ .path = "src/stm32mp1/linker.ld" });
 
     const stm32header_elf = b.addExecutable(.{
         .name = "stm32header",
@@ -47,15 +47,15 @@ pub fn build(b: *std.Build) void {
     });
     stm32header_elf.linkSystemLibrary("c");
 
-    const copy_elf = b.addInstallArtifact(qsmp_fsbl_elf, .{});
-    const bin = b.addObjCopy(qsmp_fsbl_elf.getEmittedBin(), .{ .format = .bin });
+    const copy_elf = b.addInstallArtifact(fsbl_elf, .{});
+    const bin = b.addObjCopy(fsbl_elf.getEmittedBin(), .{ .format = .bin });
     const copy_bin = b.addInstallBinFile(bin.getOutput(), "qsmp-fsbl.bin");
     const elf2_run_step = b.addRunArtifact(stm32header_elf);
 
     bin.step.dependOn(&copy_elf.step);
     copy_bin.step.dependOn(&bin.step);
     elf2_run_step.step.dependOn(&copy_bin.step);
-    elf2_run_step.addFileArg(qsmp_fsbl_elf.getEmittedBin()); // elf
+    elf2_run_step.addFileArg(fsbl_elf.getEmittedBin()); // elf
     elf2_run_step.addFileArg(copy_bin.source); // bin
     elf2_run_step.addFileArg(.{ .path = b.getInstallPath(copy_bin.dir, "") }); // install path
 
