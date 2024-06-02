@@ -1,38 +1,45 @@
 {
-    "version": "0.2.0",
-    "configurations": [
-        {
-            "name": "Bare (Debug)",
-            "logging": {
-                "moduleLoad": true,
-                "trace": true,
-                "engineLogging": true,
-                "programOutput": true,
-                "exceptions": true
-            },
-            "filterStderr": true,
-            "filterStdout": true,
-            "type": "cppdbg",
-            "request": "launch",
-            "program": "${workspaceFolder}/zig-out/bin/bare",
-            "args": [],
-            "stopAtEntry": true,
-            "stopAtConnect": true,
-            "cwd": "${workspaceFolder}",
-            "environment": [{"name": "SOME_VAR", "value": "some_value"}],
-            "externalConsole": false,
-            "MIMode": "gdb",
-            "miDebuggerPath": "arm-none-eabi-gdb",
-            "miDebuggerServerAddress": "localhost:3333",
-            "launchCompleteCommand": "exec-run",
-            "debugServerPath": "openocd",
-            "debugServerArgs": "-f interface/stlink-dap.cfg  -f target/stm32mp15x.cfg -c \"reset_config srst_only ; init\"",
-            "serverStarted": "Listening on port 3333 for gdb connections",
-            "serverLaunchTimeout": 3000,
-            "setupCommands": [
-                {"text": "-enable-pretty-printing", "ignoreFailures": false }
-
-            ]
-        }
-    ]
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "preLaunchTask": "killallopenocd",
+      "name": "qsmp-fsbl (GDB Debug)",
+      "logging": {
+        "moduleLoad": true,
+        "trace": true,
+        "engineLogging": true,
+        "programOutput": true,
+        "exceptions": true
+      },
+      "filterStderr": true,
+      "filterStdout": true,
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/zig-out/bin/qsmp-fsbl",
+      "args": [],
+      "stopAtEntry": false,
+      "stopAtConnect": false,
+      "cwd": "${workspaceFolder}",
+      "environment": [{ "name": "SOME_VAR", "value": "some_value" }],
+      "externalConsole": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "arm-ostl-linux-gnueabi-gdb",
+      "launchCompleteCommand": "exec-continue",
+      "debugServerPath": "openocd",
+      "debugServerArgs": "-f interface/stlink-dap.cfg  -f target/stm32mp15x.cfg -c \"reset_config srst_only ; init ; cortex_a dbginit\"",
+      "hardwareBreakpoints": { "require": true, "limit": 6 },
+      "serverStarted": "Listening on port 3333 for gdb connections",
+      "serverLaunchTimeout": 3000,
+      "targetArchitecture": "arm",
+      "setupCommands": [
+        { "text": "-enable-pretty-printing", "ignoreFailures": false }
+      ],
+      "customLaunchSetupCommands": [
+        { "text": "target extended-remote :3333" },
+        { "text": "set architecture arm" },
+        { "text": "add-symbol-file  ${workspaceFolder}/zig-out/bin/qsmp-fsbl" },
+        { "text": "load  ${workspaceFolder}/zig-out/bin/qsmp-fsbl" }
+      ]
+    }
+  ]
 }
