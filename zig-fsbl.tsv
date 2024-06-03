@@ -1,0 +1,4 @@
+#Opt	Id	Name		Type		IP	Offset		Binary
+-	0x01	fsbl1-boot	Binary		none	0x0		tf-a-stm32mp157c-qsmp-1570-serial.stm32
+-	0x03	ssbl-boot	Binary		none	0x0		fip-stm32mp157c-qsmp-1570-serialboot.bin
+PD	0x04	fsbl		Binary		mmc0	boot1		zig-out/bin/sysram-part.stm32

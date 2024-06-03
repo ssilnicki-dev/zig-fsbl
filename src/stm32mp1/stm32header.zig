@@ -32,6 +32,7 @@ pub fn main() !u8 {
     const elf_file_path = args.next().?;
     const bin_file_path = args.next().?;
     const install_path = args.next().?;
+    const output_filename = args.next().?;
     var header: Stm32Header = .{};
     var bin_size: usize = 0;
     var bin_sum: u64 = 0;
@@ -48,7 +49,7 @@ pub fn main() !u8 {
     // prepare output binary
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     var allocator = gpa.allocator();
-    const stm32_output_path = std.fmt.allocPrint(allocator, "{s}/fsbl.stm32", .{install_path}) catch unreachable;
+    const stm32_output_path = std.fmt.allocPrint(allocator, "{s}/{s}.stm32", .{ install_path, output_filename }) catch unreachable;
     defer allocator.free(stm32_output_path);
     const output = try std.fs.createFileAbsolute(stm32_output_path, .{});
     // write empty STM32 header
@@ -75,7 +76,7 @@ pub fn main() !u8 {
     header.img_length = @intCast(bin_size);
     _ = try output.seekTo(0);
     _ = try output.writeAll(@as([*]u8, @ptrCast(&header))[0..@sizeOf(Stm32Header)]);
-    std.debug.print("ELF binary enrty point @ 0x{X}, binary length w/0 STM32 header = {d}, binary checksum = 0x{X}.\n", .{ elf_header.e_entry, header.img_length, header.checksum });
+    std.debug.print("{s} ELF binary enrty point @ 0x{X}, binary length w/0 STM32 header = {d}, binary checksum = 0x{X}.\n", .{ output_filename, elf_header.e_entry, header.img_length, header.checksum });
 
     return 0;
 }
