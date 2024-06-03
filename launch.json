@@ -3,7 +3,7 @@
   "configurations": [
     {
       "preLaunchTask": "killallopenocd",
-      "name": "qsmp-fsbl (GDB Debug)",
+      "name": "qsmp-fsbl (periphery setup from DDR) (GDB Debug)",
       "logging": {
         "moduleLoad": true,
         "trace": true,
@@ -37,8 +37,10 @@
       "customLaunchSetupCommands": [
         { "text": "target extended-remote :3333" },
         { "text": "set architecture arm" },
-        { "text": "add-symbol-file  ${workspaceFolder}/zig-out/bin/qsmp-fsbl" },
-        { "text": "load  ${workspaceFolder}/zig-out/bin/qsmp-fsbl" }
+        {
+          "text": "add-symbol-file  ${workspaceFolder}/zig-out/bin/ddr-part"
+        },
+        { "text": "load  ${workspaceFolder}/zig-out/bin/ddr-part" }
       ]
     }
   ]

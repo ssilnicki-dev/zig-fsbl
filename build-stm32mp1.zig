@@ -38,6 +38,23 @@ pub fn build(b: *std.Build) void {
     fsbl_elf.addAssemblyFile(.{ .path = "src/stm32mp1/load.S" });
     fsbl_elf.setLinkerScript(.{ .path = "src/stm32mp1/linker.ld" });
 
+    const sysram_part_elf = b.addExecutable(.{
+        .name = "sysram-part",
+        .root_source_file = .{ .path = "src/stm32mp1/sysram_part.zig" },
+        .target = resolver_target,
+        .optimize = optimize,
+    });
+    sysram_part_elf.addAssemblyFile(.{ .path = "src/stm32mp1/sysram_part.S" });
+    sysram_part_elf.setLinkerScript(.{ .path = "src/stm32mp1/sysram_part.ld" });
+
+    const ddr_part_elf = b.addExecutable(.{
+        .name = "ddr-part",
+        .root_source_file = .{ .path = "src/stm32mp1/ddr_part.zig" },
+        .target = resolver_target,
+        .optimize = .Debug,
+    });
+    ddr_part_elf.addAssemblyFile(.{ .path = "src/stm32mp1/ddr_part.S" });
+    ddr_part_elf.setLinkerScript(.{ .path = "src/stm32mp1/ddr_part.ld" });
 
     const stm32header_elf = b.addExecutable(.{
         .name = "stm32header",
@@ -47,17 +64,34 @@ pub fn build(b: *std.Build) void {
     });
     stm32header_elf.linkSystemLibrary("c");
 
+    const copy_sysram_part_elf = b.addInstallArtifact(sysram_part_elf, .{});
+    const sysram_bin = b.addObjCopy(sysram_part_elf.getEmittedBin(), .{ .format = .bin });
+    const copy_sysram_bin = b.addInstallBinFile(sysram_bin.getOutput(), "sysram-part.bin");
+    const copy_ddr_part_elf = b.addInstallArtifact(ddr_part_elf, .{});
+    const sysram_elf2_run_step = b.addRunArtifact(stm32header_elf);
+
+    sysram_elf2_run_step.addFileArg(sysram_part_elf.getEmittedBin()); // elf
+    sysram_elf2_run_step.addFileArg(copy_sysram_bin.source); // bin
+    sysram_elf2_run_step.addFileArg(.{ .path = b.getInstallPath(copy_sysram_bin.dir, "") }); // install path
+    sysram_elf2_run_step.addArg("sysram-part"); // output filename
+
+    copy_sysram_bin.step.dependOn(&copy_sysram_part_elf.step);
+    sysram_elf2_run_step.step.dependOn(&copy_sysram_bin.step);
+
     const copy_elf = b.addInstallArtifact(fsbl_elf, .{});
     const bin = b.addObjCopy(fsbl_elf.getEmittedBin(), .{ .format = .bin });
     const copy_bin = b.addInstallBinFile(bin.getOutput(), "qsmp-fsbl.bin");
     const elf2_run_step = b.addRunArtifact(stm32header_elf);
 
     bin.step.dependOn(&copy_elf.step);
+    bin.step.dependOn(&sysram_elf2_run_step.step);
+    bin.step.dependOn(&copy_ddr_part_elf.step);
     copy_bin.step.dependOn(&bin.step);
     elf2_run_step.step.dependOn(&copy_bin.step);
     elf2_run_step.addFileArg(fsbl_elf.getEmittedBin()); // elf
     elf2_run_step.addFileArg(copy_bin.source); // bin
     elf2_run_step.addFileArg(.{ .path = b.getInstallPath(copy_bin.dir, "") }); // install path
+    elf2_run_step.addArg("qsmp-fsbl"); // output filename
 
     b.default_step.dependOn(&elf2_run_step.step);
 

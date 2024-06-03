@@ -8,7 +8,7 @@ const FieldShiftType = switch (BusType) {
 const FieldWidthType = FieldShiftType;
 const hsi_fq_hz: u32 = 64000000;
 const csi_fq_hz: u32 = 4000000;
-var hse_fq_hz: u32 = 0;
+var hse_fq_hz: u32 = 24_000_000;
 
 // main peripheral instantiation
 const bus: struct {
