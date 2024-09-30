@@ -1,10 +1,8 @@
 const std = @import("std");
 const Target = @import("std").Target;
-const CrossTarget = std.zig.CrossTarget;
 const Feature = @import("std").Target.Cpu.Feature;
 
 pub fn build(b: *std.Build) void {
-    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSmall });
     const standard_target = b.standardTargetOptions(.{});
 
     const armv7a_features = Target.arm.Feature;
@@ -14,7 +12,7 @@ pub fn build(b: *std.Build) void {
     enabled_features.addFeature(@intFromEnum(armv7a_features.neon));
     enabled_features.addFeature(@intFromEnum(armv7a_features.vfp3d16));
 
-    const armv7a_target = CrossTarget{
+    const armv7a_target = std.Target.Query{
         .cpu_arch = .arm,
         .os_tag = .freestanding,
         .cpu_model = .{
@@ -31,36 +29,33 @@ pub fn build(b: *std.Build) void {
 
     const fsbl_elf = b.addExecutable(.{
         .name = "qsmp-fsbl",
-        .root_source_file = .{ .path = "src/stm32mp1/fsbl.zig" },
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
         .target = resolver_target,
-        .optimize = optimize,
     });
-    fsbl_elf.addAssemblyFile(.{ .path = "src/stm32mp1/load.S" });
-    fsbl_elf.setLinkerScript(.{ .path = "src/stm32mp1/linker.ld" });
+    fsbl_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/load.S" } });
+    fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker.ld" } });
 
     const sysram_part_elf = b.addExecutable(.{
         .name = "sysram-part",
-        .root_source_file = .{ .path = "src/stm32mp1/sysram_part.zig" },
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.zig" } },
         .target = resolver_target,
-        .optimize = optimize,
     });
-    sysram_part_elf.addAssemblyFile(.{ .path = "src/stm32mp1/sysram_part.S" });
-    sysram_part_elf.setLinkerScript(.{ .path = "src/stm32mp1/sysram_part.ld" });
+    sysram_part_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.S" } });
+    sysram_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.ld" } });
 
     const ddr_part_elf = b.addExecutable(.{
         .name = "ddr-part",
-        .root_source_file = .{ .path = "src/stm32mp1/ddr_part.zig" },
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.zig" } },
         .target = resolver_target,
         .optimize = .Debug,
     });
-    ddr_part_elf.addAssemblyFile(.{ .path = "src/stm32mp1/ddr_part.S" });
-    ddr_part_elf.setLinkerScript(.{ .path = "src/stm32mp1/ddr_part.ld" });
+    ddr_part_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.S" } });
+    ddr_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.ld" } });
 
     const stm32header_elf = b.addExecutable(.{
         .name = "stm32header",
-        .root_source_file = .{ .path = "src/stm32mp1/stm32header.zig" },
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/stm32header.zig" } },
         .target = standard_target,
-        .optimize = optimize,
     });
     stm32header_elf.linkSystemLibrary("c");
 
@@ -72,7 +67,7 @@ pub fn build(b: *std.Build) void {
 
     sysram_elf2_run_step.addFileArg(sysram_part_elf.getEmittedBin()); // elf
     sysram_elf2_run_step.addFileArg(copy_sysram_bin.source); // bin
-    sysram_elf2_run_step.addFileArg(.{ .path = b.getInstallPath(copy_sysram_bin.dir, "") }); // install path
+    sysram_elf2_run_step.addFileArg(.{ .src_path = .{ .owner = b, .sub_path = b.getInstallPath(copy_sysram_bin.dir, "") } }); // install path
     sysram_elf2_run_step.addArg("sysram-part"); // output filename
 
     copy_sysram_bin.step.dependOn(&copy_sysram_part_elf.step);
@@ -90,15 +85,15 @@ pub fn build(b: *std.Build) void {
     elf2_run_step.step.dependOn(&copy_bin.step);
     elf2_run_step.addFileArg(fsbl_elf.getEmittedBin()); // elf
     elf2_run_step.addFileArg(copy_bin.source); // bin
-    elf2_run_step.addFileArg(.{ .path = b.getInstallPath(copy_bin.dir, "") }); // install path
+    elf2_run_step.addFileArg(.{ .src_path = .{ .owner = b, .sub_path = b.getInstallPath(copy_bin.dir, "") } }); // install path
     elf2_run_step.addArg("qsmp-fsbl"); // output filename
 
     b.default_step.dependOn(&elf2_run_step.step);
 
     const regmap_unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/stm32mp1/stm32mp157c.zig" },
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/stm32mp157c.zig" } },
         .target = standard_target,
-        .optimize = optimize,
+        .optimize = .ReleaseSafe,
     });
 
     const run_regmap_unit_tests = b.addRunArtifact(regmap_unit_tests);
