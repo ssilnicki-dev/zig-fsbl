@@ -1,7 +1,7 @@
 const std = @import("std");
-const stm32mp1 = @import("build-stm32mp1.zig");
+const cv1800b = @import("build-cv1800b.zig");
 
 pub fn build(b: *std.Build) void {
     _ = b.standardOptimizeOption(.{});
-    stm32mp1.build(b);
+    cv1800b.build(b);
 }

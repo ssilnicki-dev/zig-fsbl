@@ -1,9 +1,9 @@
-OUTPUT_ARCH(arm)
+OUTPUT_ARCH(riscv64)
 ENTRY(_start)
 
 SECTIONS
 {
-  . = 0x2FFC2500;
+  . = 0x80200000;
 
     .text : ALIGN(4) {
         *(.text)
