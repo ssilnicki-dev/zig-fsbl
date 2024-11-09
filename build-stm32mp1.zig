@@ -2,7 +2,7 @@ const std = @import("std");
 const Target = @import("std").Target;
 const Feature = @import("std").Target.Cpu.Feature;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     const standard_target = b.standardTargetOptions(.{});
 
     const armv7a_features = Target.arm.Feature;
@@ -31,6 +31,8 @@ pub fn build(b: *std.Build) void {
         .name = "qsmp-fsbl",
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
         .target = resolver_target,
+        .optimize = optimize,
+        .strip = false,
     });
     fsbl_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/load.S" } });
     fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker.ld" } });
@@ -39,6 +41,8 @@ pub fn build(b: *std.Build) void {
         .name = "sysram-part",
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.zig" } },
         .target = resolver_target,
+        .optimize = optimize,
+        .strip = false,
     });
     sysram_part_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.S" } });
     sysram_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.ld" } });
@@ -47,7 +51,8 @@ pub fn build(b: *std.Build) void {
         .name = "ddr-part",
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.zig" } },
         .target = resolver_target,
-        .optimize = .Debug,
+        .optimize = optimize,
+        .strip = false,
     });
     ddr_part_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.S" } });
     ddr_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.ld" } });
@@ -56,6 +61,8 @@ pub fn build(b: *std.Build) void {
         .name = "stm32header",
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/stm32header.zig" } },
         .target = standard_target,
+        .optimize = .ReleaseFast,
+        .strip = true,
     });
     stm32header_elf.linkSystemLibrary("c");
 
