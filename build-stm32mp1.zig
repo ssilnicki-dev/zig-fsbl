@@ -54,7 +54,6 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         .optimize = optimize,
         .strip = false,
     });
-    ddr_part_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.S" } });
     ddr_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.ld" } });
 
     const stm32header_elf = b.addExecutable(.{
