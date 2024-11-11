@@ -26,7 +26,7 @@
       "miDebuggerPath": "arm-ostl-linux-gnueabi-gdb",
       "launchCompleteCommand": "exec-continue",
       "debugServerPath": "openocd",
-      "debugServerArgs": "-f interface/stlink-dap.cfg  -f target/stm32mp15x.cfg -c \"reset_config srst_only ; init ; cortex_a dbginit\"",
+      "debugServerArgs": "-f interface/ftdi/dp_busblaster.cfg  -f target/stm32mp15x.cfg -c \"adapter speed 28000 ; reset_config srst_only ; init ; cortex_a dbginit\"",
       "hardwareBreakpoints": { "require": true, "limit": 6 },
       "serverStarted": "Listening on port 3333 for gdb connections",
       "serverLaunchTimeout": 3000,
