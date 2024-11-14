@@ -2,46 +2,24 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "preLaunchTask": "killallopenocd",
-      "name": "qsmp-fsbl (periphery setup from DDR) (GDB Debug)",
-      "logging": {
-        "moduleLoad": true,
-        "trace": true,
-        "engineLogging": true,
-        "programOutput": true,
-        "exceptions": true
-      },
-      "filterStderr": true,
-      "filterStdout": true,
-      "type": "cppdbg",
-      "request": "launch",
-      "program": "${workspaceFolder}/zig-out/bin/qsmp-fsbl",
-      "args": [],
-      "stopAtEntry": false,
-      "stopAtConnect": false,
-      "cwd": "${workspaceFolder}",
-      "environment": [{ "name": "SOME_VAR", "value": "some_value" }],
-      "externalConsole": false,
-      "MIMode": "gdb",
-      "miDebuggerPath": "arm-ostl-linux-gnueabi-gdb",
-      "launchCompleteCommand": "exec-continue",
-      "debugServerPath": "openocd",
-      "debugServerArgs": "-f interface/ftdi/dp_busblaster.cfg  -f target/stm32mp15x.cfg -c \"adapter speed 28000 ; reset_config srst_only ; init ; cortex_a dbginit\"",
-      "hardwareBreakpoints": { "require": true, "limit": 6 },
-      "serverStarted": "Listening on port 3333 for gdb connections",
-      "serverLaunchTimeout": 3000,
-      "targetArchitecture": "arm",
-      "setupCommands": [
-        { "text": "-enable-pretty-printing", "ignoreFailures": false }
-      ],
-      "customLaunchSetupCommands": [
-        { "text": "target extended-remote :3333" },
-        { "text": "set architecture arm" },
-        {
-          "text": "add-symbol-file  ${workspaceFolder}/zig-out/bin/ddr-part"
-        },
-        { "text": "load  ${workspaceFolder}/zig-out/bin/ddr-part" }
-      ]
+      "name": "Debug STM32MP1",
+      "type": "lldb-vscode",
+      "request": "attach",
+      "stopOnEntry": true,
+      "program": "${workspaceFolder}/zig-out/bin/ddr-part",
+          "initCommands": [
+            "shell pkill -f openocd",
+            "shell daemon -- openocd -f interface/ftdi/dp_busblaster.cfg -f target/stm32mp15x.cfg -f ${workspaceFolder}/src/stm32mp1/openocd-init.cfg",
+            "shell sh -c 'until nc -z localhost 3333 2\>/dev/null\; do sleep 0.1\; done'",
+          ],
+          "attachCommands": [
+            "file --arch armv7-none-none ${workspaceFolder}/zig-out/bin/ddr-part",
+            "gdb-remote 3333",
+            "target modules load --load --set-pc-to-entry --slide 0",
+          ],
+          "terminateCommands": [
+            "shell pkill -f openocd",
+          ]
     }
   ]
 }
