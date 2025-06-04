@@ -1,3 +1,4 @@
+const keep = @import("std").mem.doNotOptimizeAway;
 // platform specifics
 const BusType: type = u32;
 const FieldShiftType = switch (BusType) {
@@ -227,6 +228,10 @@ const SDMMC = struct {
     const BusRXClockSource = enum(u2) { Internal = 0, External = 1, InternalDelay = 2 };
     const BusWidth = enum(u2) { Default1Bit = 0, Wide4Bit = 1, Wide8Bit = 2 };
     const BusPowerSave = enum(u1) { PowerSaveOff = 0, PowerSaveOn = 1 };
+    const DataBlockSize = enum(u4) {
+        Bytes512 = 9,
+        Bytes64 = 6,
+    };
 
     const Command = enum(u8) {
         const app_cmd_flag: u8 = 1 << 7;
@@ -234,6 +239,7 @@ const SDMMC = struct {
         SEND_OP_COND = 1,
         ALL_SEND_CID = 2,
         SEND_RELATIVE_ADDR = 3,
+        SWITCH_FUNC = 6,
         SELECT_DESELECT_CARD = 7,
         SEND_IF_COND = 8,
         SEND_CSD = 9,
@@ -247,6 +253,7 @@ const SDMMC = struct {
                 .SEND_OP_COND => .{ .ret = .{ .r3 = undefined } },
                 .ALL_SEND_CID => .{ .ret = .{ .r2 = undefined } },
                 .SEND_RELATIVE_ADDR => .{ .ret = .{ .r6 = undefined } },
+                .SWITCH_FUNC => .{ .ret = .{ .r1 = undefined }, .timeout = 2000 },
                 .SELECT_DESELECT_CARD => .{ .ret = .{ .r1b = undefined }, .timeout = 0xFFFFFFFF }, // huge timeout value taken from u-boot implementation
                 .SEND_IF_COND => .{ .ret = .{ .r7 = undefined } },
                 .SEND_CSD => .{ .ret = .{ .r2 = undefined } },
@@ -292,20 +299,64 @@ const SDMMC = struct {
         };
     };
 
+    fn prepareDataTransfer(self: *SDMMC, data: []align(4) u8, direction: enum(u1) { Write = 0, Read = 1 }, block_size: DataBlockSize) void {
+        (Field{ .reg = self.getReg(.DLENR), .shift = 0, .width = 24 }).set(data.len);
+
+        const dctrl = self.getReg(.DCTRL);
+        (Register{ .addr = dctrl }).set(0);
+        (Field{ .reg = dctrl, .shift = 1, .width = 1 }).set(@intFromEnum(direction));
+        (Field{ .reg = dctrl, .shift = 4, .width = 4 }).set(@intFromEnum(block_size));
+
+        mpu.invalidateDataCache(data, true);
+
+        (Register{ .addr = self.getReg(.IDMABASER) }).set(@intFromPtr(data.ptr));
+        (Field{ .reg = self.getReg(.IDMACTRLR), .shift = 0, .width = 1 }).set(1); // IDMAEN
+    }
+
+    fn completeDataTransfer(self: *SDMMC) Error!void {
+        const dcrcfail = 1;
+        const dtimeout = 3;
+        const idmate = 27;
+        const dataend = 8;
+
+        const status_bits = [_]FieldShiftType{ dtimeout, dcrcfail, idmate, dataend };
+        switch ((Register{ .addr = self.getReg(.STAR) }).monitorBits(status_bits[0..])) {
+            dcrcfail => return Error.CRCError,
+            dtimeout => return Error.Timeout,
+            else => {},
+        }
+    }
+
+    fn stopDataTransfer(self: *SDMMC) Error!void {
+        _ = self; // autofix
+    }
+
+    fn transferData(self: *SDMMC, comptime cmd: Command, arg: u32) Error!Command.RetType {
+        _ = try self.getCommandResponse(cmd, arg);
+        try self.completeDataTransfer();
+        return Command.RetType{ .empty = {} };
+    }
+
+    fn readData(self: *SDMMC, comptime cmd: Command, arg: u32, data: []align(4) u8) Error!Command.RetType {
+        self.prepareDataTransfer(data, .Read, .Bytes64);
+        return try self.transferData(cmd, arg);
+    }
+
     fn getCommandResponse(self: *SDMMC, comptime cmd: Command, arg: u32) Error!Command.RetType {
         if (cmd == .SELECT_DESELECT_CARD) {
             self.app_cmd_addr = arg;
         }
 
-        if (@intFromEnum(cmd) & Command.app_cmd_flag == Command.app_cmd_flag)
+        if ((@intFromEnum(cmd) & Command.app_cmd_flag) == Command.app_cmd_flag)
             _ = try (self.getCommandResponse(.APP_CMD, self.app_cmd_addr));
 
         const cmdr = self.getReg(.CMDR);
         const cpsmen: Field = .{ .reg = cmdr, .shift = 12, .width = 1 };
+        const cmdtrans: Field = .{ .reg = cmdr, .shift = 6, .width = 1 };
 
         if (cpsmen.isAsserted())
             (Register{ .addr = cmdr }).reset();
-        (Register{ .addr = self.getReg(.DCTRL) }).reset();
+
         var stuff = cmd.getStuff();
         const resp_type = stuff.ret.getRespType();
         (Field{ .reg = cmdr, .shift = 8, .width = 2 }).set(@intFromEnum(resp_type));
@@ -313,6 +364,9 @@ const SDMMC = struct {
         self.clearInterrupts();
         (Register{ .addr = self.getReg(.ARGR) }).set(arg);
         (Field{ .reg = cmdr, .shift = 0, .width = 6 }).set(@intFromEnum(cmd));
+        if (cmd == .SWITCH_FUNC) {
+            cmdtrans.set(1);
+        } else cmdtrans.set(0);
         cpsmen.set(1);
         const star = self.getReg(.STAR);
         const ctimeout: Field = .{ .reg = star, .shift = 2, .width = 1, .rw = .ReadOnly };
@@ -451,6 +505,13 @@ const SDMMC = struct {
         serial: u32,
         sdmmc: *SDMMC,
         const CardState = Command.RetType.CardStatus.CardState;
+        fn getSupportedFunctions(self: Card, data: []align(4) u8) Error!void {
+            var ret = self.sdmmc.readData(.SWITCH_FUNC, 0, data) catch |e| {
+                keep(&e);
+                return;
+            };
+            keep(&ret);
+        }
         pub fn getState(self: *const Card) Error!CardState {
             return (try self.sdmmc.getCommandResponse(.SEND_STATUS, @as(u32, self.addr) << 16)).r1.card_status.getState();
         }
@@ -477,6 +538,9 @@ const SDMMC = struct {
             try self.select();
             _ = try self.sdmmc.getCommandResponse(.SET_BUS_WIDTH, @intFromEnum(SDBusWidth.Wide4Bit));
             self.sdmmc.configure(self.sdmmc.getBusClockHz(), .SDR, .Wide4Bit, .PowerSaveOn);
+
+            var data: [64]u8 align(4) = undefined; // 512 bit data reply for CMD6
+            try self.getSupportedFunctions(data[0..]);
         }
     };
 
