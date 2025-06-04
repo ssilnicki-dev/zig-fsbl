@@ -20,6 +20,26 @@
           "terminateCommands": [
             "shell pkill -f openocd || true",
           ]
+    },
+    {
+      "name": "Debug i.MX8M Nano",
+      "type": "lldb-vscode",
+      "request": "attach",
+      "stopOnEntry": true,
+      "program": "${workspaceFolder}/zig-out/bin/qs8m-fsbl",
+          "initCommands": [
+            "shell pkill -f openocd || true",
+            "shell daemon -- openocd -f interface/ftdi/dp_busblaster.cfg -f target/imx8m.cfg -f ${workspaceFolder}/src/imx8m/openocd-init.cfg",
+            "shell sh -c \"until nc -z localhost 3333 2\\>/dev/null\\; do sleep 0.1\\; done\""
+          ],
+          "attachCommands": [
+            "file --arch aarch64 ${workspaceFolder}/zig-out/bin/qs8m-fsbl",
+            "gdb-remote 3333",
+            "target modules load --load --set-pc-to-entry --slide 0",
+          ],
+          "terminateCommands": [
+            "shell pkill -f openocd || true",
+          ]
     }
   ]
 }
