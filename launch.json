@@ -8,9 +8,9 @@
       "stopOnEntry": true,
       "program": "${workspaceFolder}/zig-out/bin/ddr-part",
           "initCommands": [
-            "shell pkill -f openocd",
+            "shell pkill -f openocd || true",
             "shell daemon -- openocd -f interface/ftdi/dp_busblaster.cfg -f target/stm32mp15x.cfg -f ${workspaceFolder}/src/stm32mp1/openocd-init.cfg",
-            "shell sh -c 'until nc -z localhost 3333 2\>/dev/null\; do sleep 0.1\; done'",
+            "shell sh -c \"until nc -z localhost 3333 2\\>/dev/null\\; do sleep 0.1\\; done\""
           ],
           "attachCommands": [
             "file --arch armv7-none-none ${workspaceFolder}/zig-out/bin/ddr-part",
@@ -18,7 +18,7 @@
             "target modules load --load --set-pc-to-entry --slide 0",
           ],
           "terminateCommands": [
-            "shell pkill -f openocd",
+            "shell pkill -f openocd || true",
           ]
     }
   ]
