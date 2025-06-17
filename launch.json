@@ -2,7 +2,27 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Debug STM32MP1",
+      "name": "Debug STM32MP1 FSBL",
+      "type": "lldb-vscode",
+      "request": "attach",
+      "stopOnEntry": true,
+      "program": "${workspaceFolder}/zig-out/bin/qsmp-fsbl",
+          "initCommands": [
+            "shell pkill -f openocd || true",
+            "shell daemon -- openocd -f interface/ftdi/dp_busblaster.cfg -f target/stm32mp15x.cfg -f ${workspaceFolder}/src/stm32mp1/openocd-init.cfg",
+            "shell sh -c \"until nc -z localhost 3333 2\\>/dev/null\\; do sleep 0.1\\; done\""
+          ],
+          "attachCommands": [
+            "file --arch armv7-none-none ${workspaceFolder}/zig-out/bin/qsmp-fsbl",
+            "gdb-remote 3333",
+            "target modules load --load --set-pc-to-entry --slide 0",
+          ],
+          "terminateCommands": [
+            "shell pkill -f openocd || true",
+          ]
+    },
+    {
+      "name": "Debug STM32MP1 (DDR)",
       "type": "lldb-vscode",
       "request": "attach",
       "stopOnEntry": true,

@@ -33,9 +33,13 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         .target = resolver_target,
         .optimize = optimize,
         .strip = false,
+        .unwind_tables = .none,
     });
-    fsbl_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/load.S" } });
     fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker.ld" } });
+    fsbl_elf.link_gc_sections = true;
+    fsbl_elf.link_function_sections = true;
+    fsbl_elf.link_data_sections = true;
+    // fsbl_elf.want_lto = true;
 
     const sysram_part_elf = b.addExecutable(.{
         .name = "sysram-part",
