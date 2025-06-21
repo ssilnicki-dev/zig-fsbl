@@ -15,10 +15,6 @@ export fn _start() callconv(.naked) void {
 }
 
 export fn Reset_Handler() callconv(.naked) void {
-    asm volatile ("mov sp, %[sp_value]"
-        :
-        : [sp_value] "r" (&stack_bottom_addr),
-    );
     asm volatile (
     // enable C10-C11 coprocessors - VFP&NEON
         \\ ldr r1, =0xF00000
