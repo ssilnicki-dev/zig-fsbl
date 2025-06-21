@@ -33,7 +33,6 @@ export fn Reset_Handler() callconv(.naked) void {
         \\ vmsr FPEXC, r0
     );
 
-    asm volatile ("bl main");
     asm volatile ("nop");
     asm volatile ("b .-2");
 }
@@ -56,9 +55,4 @@ export fn IRQ_Handler() callconv(.naked) void {
 export fn loop_stub() callconv(.naked) void {
     asm volatile ("nop");
     asm volatile ("b .-2");
-}
-
-export fn main() void {
-    qsmp.rccMpuAxiDdrInit();
-    qsmp.peripheryInit();
 }
