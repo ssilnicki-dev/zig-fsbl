@@ -51,3 +51,10 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
         }
     };
 }
+
+pub inline fn EndlessLoop() void {
+    asm volatile (
+        \\ nop
+        \\ b . -2
+    );
+}
