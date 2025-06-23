@@ -16,20 +16,12 @@ export fn _start() callconv(.naked) void {
 }
 
 export fn Reset_Handler() callconv(.naked) void {
-    asm volatile (
-    // enable C10-C11 coprocessors - VFP&NEON
-        \\ ldr r1, =0xF00000
-        \\ mcr p15, 0, r1, c1, c0, 2
-
-        // enable simd in NSACR
-        \\ ldr r0, =0xC00
-        \\ mcr p15, 0, r0, c1, c1, 2
-
-        // enable VFP instructions
-        \\ ldr r0, =0x40000000
-        \\ vmsr FPEXC, r0
-    );
-
+    arch.CPACR.CP10.Select(.Enabled); // SIMD
+    arch.CPACR.CP11.Select(.Enabled); // FPE
+    arch.NSACR.AllCPAccessInNonSecureMode.Select(.Disabled);
+    arch.NSACR.CP10.Select(.AccessFromAnySecureState); // SIMD
+    arch.NSACR.CP11.Select(.AccessFromAnySecureState); // FPE
+    arch.FPEXC.EN.Select(.Enabled); // Enable SIMD & FPE Extensions
     arch.EndlessLoop();
 }
 

@@ -1,6 +1,24 @@
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum(u4) { r0 = 0 };
 
+pub const CPACR = struct {
+    const self = CP15Reg(0, 1, 0, 2);
+    pub const CP10 = self.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
+    pub const CP11 = self.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
+};
+
+pub const NSACR = struct {
+    const self = CP15Reg(0, 1, 1, 2);
+    pub const AllCPAccessInNonSecureMode = self.Field(0, 14, enum(u1) { Disabled = 0 });
+    pub const CP10 = self.Field(0, 10, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    pub const CP11 = self.Field(0, 11, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+};
+
+pub const FPEXC = struct {
+    const self = FPReg(.fpexc);
+    pub const EN = self.Bit(30);
+};
+
 // TODO: add support for 64 bit width registers
 fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3) type {
     return struct {
