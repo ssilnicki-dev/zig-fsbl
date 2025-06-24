@@ -19,6 +19,16 @@ pub inline fn SetMode(comptime mode: Mode) void {
     asm volatile ("isb");
 }
 
+pub const VBAR = struct {
+    const self = CP15Reg(0, 12, 0, 0);
+    pub const writeFrom = self.writeFrom;
+};
+
+pub const MVBAR = struct {
+    const self = CP15Reg(0, 12, 0, 1);
+    pub const writeFrom = self.writeFrom;
+};
+
 pub const SCTLR = struct {
     const self = CP15Reg(0, 1, 0, 0);
     pub const DSSBS = self.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });

@@ -30,6 +30,11 @@ export fn Reset_Handler() callconv(.naked) void {
 
     arch.SetMode(.Monitor);
 
+    arch.LoadAddr(.r0, &_start);
+    arch.VBAR.writeFrom(.r0);
+    arch.MVBAR.writeFrom(.r0);
+    asm volatile ("isb");
+
     arch.EndlessLoop();
 }
 
