@@ -16,12 +16,6 @@ export fn _start() callconv(.naked) void {
 }
 
 export fn Reset_Handler() callconv(.naked) void {
-    arch.CPACR.CP10.Select(.Enabled); // SIMD
-    arch.CPACR.CP11.Select(.Enabled); // FPE
-    arch.NSACR.AllCPAccessInNonSecureState.Select(.Disabled);
-    arch.NSACR.CP10.Select(.AccessFromAnySecureState); // SIMD
-    arch.NSACR.CP11.Select(.AccessFromAnySecureState); // FPE
-    arch.FPEXC.EN.Select(.Enabled); // Enable SIMD & FPE Extensions
     arch.EndlessLoop();
 }
 
