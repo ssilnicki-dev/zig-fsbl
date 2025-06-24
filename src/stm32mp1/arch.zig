@@ -50,18 +50,24 @@ fn FPReg(comptime register: @TypeOf(.@"enum")) type {
 fn GenericAccessors(self: type) type {
     return struct {
         const data = armv7_general_register.r0;
-        fn Bit(comptime bit: u5) type {
-            return Field(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
+
+        fn ReservedBit(comptime shift: u5, comptime value: u1) type {
+            return ReservedField(shift, 1, value);
         }
-        fn Data32() type {
+
+        fn ReservedField(comptime shift: u5, comptime width: u5, comptime value: u32) type {
+            comptime if ((32 - @clz(value)) > width) {
+                @compileError(print("Field value {d} does not fit {d} bit field", .{ value, width }));
+            };
             return struct {
-                pub inline fn readTo(comptime reg: armv7_general_register) void {
-                    self.readTo(reg);
-                }
-                pub inline fn writeFrom(comptime reg: armv7_general_register) void {
-                    self.writeFrom(reg);
+                pub inline fn asU32() u32 {
+                    return value << shift;
                 }
             };
+        }
+
+        fn Bit(comptime bit: u5) type {
+            return Field(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
         }
 
         fn Field(comptime shift: u5, comptime width: u5, comptime values: @TypeOf(enum {})) type {
@@ -88,6 +94,9 @@ fn GenericAccessors(self: type) type {
                 pub inline fn readTo(comptime reg: armv7_general_register) void {
                     self.readTo(reg);
                     asm volatile (print("ubfx r{d}, r{d}, {d}, {d}", .{ @intFromEnum(reg), @intFromEnum(reg), shift, width }));
+                }
+                pub inline fn asU32(comptime value: values) u32 {
+                    return @as(u32, @intFromEnum(value)) << shift;
                 }
             };
         }
