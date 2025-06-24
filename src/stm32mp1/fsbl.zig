@@ -28,6 +28,8 @@ export fn Reset_Handler() callconv(.naked) void {
     SCTLR.writeFrom(.r0);
     asm volatile ("isb");
 
+    arch.SetMode(.Monitor);
+
     arch.EndlessLoop();
 }
 

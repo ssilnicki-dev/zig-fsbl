@@ -6,6 +6,12 @@ pub inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32
     asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
 }
 
+const Mode = enum(u5) { Monitor = 0x16 };
+pub inline fn SetMode(comptime mode: Mode) void {
+    asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
+    asm volatile ("isb");
+}
+
 pub const SCTLR = struct {
     const self = CP15Reg(0, 1, 0, 0);
     pub const DSSBS = self.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });
