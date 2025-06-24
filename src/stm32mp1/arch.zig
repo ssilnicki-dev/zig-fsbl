@@ -1,6 +1,11 @@
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum(u4) { r0 = 0 };
 
+pub inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32) void {
+    asm volatile (print("movw r{d}, #:lower16:{d}", .{ @intFromEnum(reg), value }));
+    asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
+}
+
 pub const CPACR = struct {
     const self = CP15Reg(0, 1, 0, 2);
     pub const CP10 = self.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
