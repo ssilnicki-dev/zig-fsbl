@@ -16,6 +16,18 @@ export fn _start() callconv(.naked) void {
 }
 
 export fn Reset_Handler() callconv(.naked) void {
+    const SCTLR = arch.SCTLR;
+    arch.SetValue(.r0, SCTLR.RES1 |
+        SCTLR.NTWE.asU32(.NotTrapped) |
+        SCTLR.NTWI.asU32(.NotTrapped) |
+        SCTLR.CP15BEN.asU32(.Enabled) |
+        SCTLR.EE.asU32(.LittleEndian) |
+        SCTLR.TE.asU32(.ARM) |
+        SCTLR.V.asU32(.LowVectors) |
+        SCTLR.DSSBS.asU32(.DisableMitigation));
+    SCTLR.writeFrom(.r0);
+    asm volatile ("isb");
+
     arch.EndlessLoop();
 }
 

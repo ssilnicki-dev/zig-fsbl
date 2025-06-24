@@ -6,6 +6,24 @@ pub inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32
     asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
 }
 
+pub const SCTLR = struct {
+    const self = CP15Reg(0, 1, 0, 0);
+    pub const DSSBS = self.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });
+    pub const TE = self.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 });
+    pub const EE = self.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 });
+    pub const V = self.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 });
+    pub const NTWE = self.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
+    pub const NTWI = self.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
+    pub const CP15BEN = self.Bit(5);
+    const ReservedBit23 = self.ReservedBit(23, 1); // aka SPAN
+    const ReservedBit22 = self.ReservedBit(22, 1); // RES1
+    const ReservedBit04 = self.ReservedBit(4, 1); // aka LSMAOE
+    const ReservedBit03 = self.ReservedBit(3, 1); // aka nTLSMD
+    pub const RES1 = ReservedBit23.asU32() | ReservedBit22.asU32() | ReservedBit04.asU32() | ReservedBit03.asU32();
+
+    pub const writeFrom = self.writeFrom;
+};
+
 pub const CPACR = struct {
     const self = CP15Reg(0, 1, 0, 2);
     pub const CP10 = self.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
