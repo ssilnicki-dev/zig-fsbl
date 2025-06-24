@@ -6,6 +6,13 @@ pub inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32
     asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
 }
 
+pub inline fn LoadAddr(comptime reg: armv7_general_register, address: anytype) void {
+    asm volatile (print("ldr r{d}, %[addr]", .{@intFromEnum(reg)})
+        :
+        : [addr] "i" (&address),
+    );
+}
+
 const Mode = enum(u5) { Monitor = 0x16 };
 pub inline fn SetMode(comptime mode: Mode) void {
     asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
