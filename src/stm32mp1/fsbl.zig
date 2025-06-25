@@ -4,13 +4,13 @@ const arch = @import("arch.zig");
 extern const stack_bottom_addr: u32;
 
 export fn _start() callconv(.naked) void {
-    asm volatile ("b Reset_Handler");
-    asm volatile ("b Undefined_Handler");
-    asm volatile ("b SWI_Handler");
-    asm volatile ("b Prefetch_Handler");
-    asm volatile ("b Data_Handler");
-    asm volatile ("nop"); //reserved vector
-    asm volatile ("b IRQ_Handler");
+    arch.goto(Reset_Handler);
+    arch.goto(Undefined_Handler);
+    arch.goto(SWI_Handler);
+    arch.goto(Prefetch_Handler);
+    arch.goto(Data_Handler);
+    arch.goto(Reserved_Handler); //reserved vector
+    arch.goto(IRQ_Handler);
     // FIQ handler fall through
     arch.EndlessLoop(); // stub
 }
@@ -29,6 +29,7 @@ export fn Reset_Handler() callconv(.naked) void {
     asm volatile ("isb");
 
     arch.SetMode(.Monitor);
+    asm volatile ("isb");
 
     arch.LoadAddr(.r0, &_start);
     arch.VBAR.writeFrom(.r0);
@@ -51,5 +52,8 @@ export fn Data_Handler() callconv(.naked) void {
     arch.EndlessLoop();
 }
 export fn IRQ_Handler() callconv(.naked) void {
+    arch.EndlessLoop();
+}
+export fn Reserved_Handler() callconv(.naked) void {
     arch.EndlessLoop();
 }

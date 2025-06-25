@@ -1,6 +1,13 @@
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum(u4) { r0 = 0 };
 
+pub inline fn goto(comptime func: anytype) void {
+    asm volatile ("b %[addr]"
+        :
+        : [addr] "i" (func),
+    );
+}
+
 pub inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32) void {
     asm volatile (print("movw r{d}, #:lower16:{d}", .{ @intFromEnum(reg), value }));
     asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
@@ -16,7 +23,6 @@ pub inline fn LoadAddr(comptime reg: armv7_general_register, address: anytype) v
 const Mode = enum(u5) { Monitor = 0x16 };
 pub inline fn SetMode(comptime mode: Mode) void {
     asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
-    asm volatile ("isb");
 }
 
 pub const VBAR = struct {
