@@ -46,6 +46,9 @@ export fn Reset_Handler() callconv(.naked) void {
     asm volatile ("isb");
     arch.SCR.SIF.Select(.Enabled);
 
+    asm volatile ("cpsie a");
+    asm volatile ("isb");
+
     arch.EndlessLoop();
 }
 
