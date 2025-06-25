@@ -36,6 +36,8 @@ export fn Reset_Handler() callconv(.naked) void {
     arch.MVBAR.writeFrom(.r0);
     asm volatile ("isb");
 
+    arch.SCTLR.I.Select(.Enabled);
+    asm volatile ("isb");
     arch.EndlessLoop();
 }
 
