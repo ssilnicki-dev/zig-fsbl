@@ -25,6 +25,14 @@ pub inline fn SetMode(comptime mode: Mode) void {
     asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
 }
 
+pub const SCR = struct {
+    const self = CP15Reg(0, 1, 1, 0);
+    pub const SIF = self.Bit(9);
+    pub const ResetValue = 0;
+
+    pub const writeFrom = self.writeFrom;
+};
+
 pub const VBAR = struct {
     const self = CP15Reg(0, 12, 0, 0);
     pub const writeFrom = self.writeFrom;

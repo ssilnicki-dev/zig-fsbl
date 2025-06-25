@@ -40,6 +40,12 @@ export fn Reset_Handler() callconv(.naked) void {
     asm volatile ("isb");
     arch.SCTLR.A.Select(.Enabled);
     asm volatile ("isb");
+
+    arch.SetValue(.r0, arch.SCR.ResetValue);
+    arch.SCR.writeFrom(.r0);
+    asm volatile ("isb");
+    arch.SCR.SIF.Select(.Enabled);
+
     arch.EndlessLoop();
 }
 
