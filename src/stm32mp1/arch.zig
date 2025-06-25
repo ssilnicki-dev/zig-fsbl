@@ -72,8 +72,10 @@ pub const CPACR = struct {
 pub const NSACR = struct {
     const self = CP15Reg(0, 1, 1, 2);
     pub const AllCPAccessInNonSecureState = self.Field(0, 14, enum(u1) { Disabled = 0 });
-    pub const CP10 = self.Field(0, 10, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
-    pub const CP11 = self.Field(0, 11, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    pub const CP10 = self.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    pub const CP11 = self.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+
+    pub const writeFrom = self.writeFrom;
 };
 
 pub const FPEXC = struct {
