@@ -44,6 +44,7 @@ pub const SCTLR = struct {
     pub const NTWE = self.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
     pub const NTWI = self.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
     pub const CP15BEN = self.Bit(5);
+    pub const A = self.Bit(1);
     pub const I = self.Bit(12);
     const ReservedBit23 = self.ReservedBit(23, 1); // aka SPAN
     const ReservedBit22 = self.ReservedBit(22, 1); // RES1
