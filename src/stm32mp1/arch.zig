@@ -1,5 +1,5 @@
 const print = @import("std").fmt.comptimePrint;
-const armv7_general_register = enum(u4) { r0 = 0 };
+const armv7_general_register = enum(u4) { r0 = 0, r1 = 1 };
 
 pub inline fn goto(comptime func: anytype) void {
     asm volatile ("b %[addr]"
@@ -165,6 +165,18 @@ fn GenericAccessors(self: type) type {
                 }
                 pub inline fn asU32(comptime value: values) u32 {
                     return @as(u32, @intFromEnum(value)) << shift;
+                }
+                pub inline fn ifEqual(comptime cmp_value: anytype, proc: anytype) void {
+                    readTo(.r0);
+                    switch (@TypeOf(cmp_value)) {
+                        @TypeOf(.@"enum") => SetValue(.r1, @intFromEnum(@as(values, cmp_value))),
+                        comptime_int => SetValue(.r1, cmp_value),
+                        else => @compileError("unsupported value type"),
+                    }
+                    asm volatile ("cmp r0, r1");
+                    asm volatile ("bne 1f");
+                    proc();
+                    asm volatile ("1:");
                 }
             };
         }
