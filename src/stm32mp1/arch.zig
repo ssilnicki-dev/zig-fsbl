@@ -26,7 +26,7 @@ pub inline fn SetMode(comptime mode: Mode) void {
 }
 
 pub const SCR = struct {
-    const self = CP15Reg(0, 1, 1, 0);
+    const self = CP15Reg(0, 1, 1, 0, .ReadWrite);
     pub const SIF = self.Bit(9);
     pub const ResetValue = 0;
 
@@ -34,17 +34,17 @@ pub const SCR = struct {
 };
 
 pub const VBAR = struct {
-    const self = CP15Reg(0, 12, 0, 0);
+    const self = CP15Reg(0, 12, 0, 0, .ReadWrite);
     pub const writeFrom = self.writeFrom;
 };
 
 pub const MVBAR = struct {
-    const self = CP15Reg(0, 12, 0, 1);
+    const self = CP15Reg(0, 12, 0, 1, .ReadWrite);
     pub const writeFrom = self.writeFrom;
 };
 
 pub const SCTLR = struct {
-    const self = CP15Reg(0, 1, 0, 0);
+    const self = CP15Reg(0, 1, 0, 0, .ReadWrite);
     pub const DSSBS = self.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });
     pub const TE = self.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 });
     pub const EE = self.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 });
@@ -64,13 +64,13 @@ pub const SCTLR = struct {
 };
 
 pub const CPACR = struct {
-    const self = CP15Reg(0, 1, 0, 2);
+    const self = CP15Reg(0, 1, 0, 2, .ReadWrite);
     pub const CP10 = self.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
     pub const CP11 = self.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
 };
 
 pub const NSACR = struct {
-    const self = CP15Reg(0, 1, 1, 2);
+    const self = CP15Reg(0, 1, 1, 2, .ReadWrite);
     pub const AllCPAccessInNonSecureState = self.Field(0, 14, enum(u1) { Disabled = 0 });
     pub const CP10 = self.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
     pub const CP11 = self.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
@@ -84,15 +84,19 @@ pub const FPEXC = struct {
 };
 
 // TODO: add support for 64 bit width registers
-fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3) type {
+fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite }) type {
     return struct {
         usingnamespace GenericAccessors(@This());
         inline fn readTo(comptime access_reg: armv7_general_register) void {
             access(access_reg, .mrc);
         }
         inline fn writeFrom(comptime access_reg: armv7_general_register) void {
-            access(access_reg, .mcr);
+            switch (rw) {
+                .ReadWrite => access(access_reg, .mcr),
+                .ReadOnly => @compileError("Register is ReadOnly"),
+            }
         }
+
         inline fn access(comptime access_reg: armv7_general_register, comptime instruction: @TypeOf(.@"enum")) void {
             asm volatile (print("{s} p15, {d}, r{d}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @intFromEnum(access_reg), crn, crm, op2 }));
         }
