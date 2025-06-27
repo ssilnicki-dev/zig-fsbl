@@ -21,10 +21,10 @@ export fn Reset_Handler() callconv(.naked) void {
     arch.InitializeSystemControlRegister();
     arch.SetMode(.Monitor);
     arch.InitializeExceptionVectorsTable(&_start);
-    arch.EnableInstructionCache();
-    arch.EnableAlignmentFaultChecking();
+    arch.InitializeInstructionCache(.Enabled);
+    arch.InitializeAlignmentFaultChecking(.Enabled);
     arch.InitializeSecureConfigurationRegister();
-    arch.EnableAbortException();
+    arch.InitializeException(.Abort, .Enabled);
     arch.InitializeCoprocessors();
     arch.InitializePerformanceMonitorControlRegister();
 

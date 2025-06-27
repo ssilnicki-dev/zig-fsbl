@@ -219,12 +219,12 @@ pub inline fn InitializeExceptionVectorsTable(comptime addr: anytype) void {
     MVBAR.writeFrom(.r0);
 }
 
-pub inline fn EnableInstructionCache() void {
-    SCTLR.I.Select(.Enabled);
+pub inline fn InitializeInstructionCache(comptime state: @TypeOf(.@"enum")) void {
+    SCTLR.I.Select(state);
 }
 
-pub inline fn EnableAlignmentFaultChecking() void {
-    SCTLR.A.Select(.Enabled);
+pub inline fn InitializeAlignmentFaultChecking(comptime state: @TypeOf(.@"enum")) void {
+    SCTLR.A.Select(state);
 }
 
 pub inline fn InitializeSecureConfigurationRegister() void {
@@ -233,8 +233,18 @@ pub inline fn InitializeSecureConfigurationRegister() void {
     SCR.SIF.Select(.Enabled);
 }
 
-pub inline fn EnableAbortException() void {
-    asm volatile ("cpsie a");
+pub inline fn InitializeException(comptime exception: enum { Abort, IRQ, FIQ }, comptime state: enum { Enabled, Disabled }) void {
+    asm volatile (print("cpsi{s} {s}", .{
+            switch (state) {
+                .Enabled => "e",
+                .Disabled => "d",
+            },
+            switch (exception) {
+                .Abort => "a",
+                .FIQ => "f",
+                .IRQ => "i",
+            },
+        }));
     asm volatile ("isb");
 }
 
