@@ -26,24 +26,18 @@ export fn Reset_Handler() callconv(.naked) void {
         SCTLR.V.asU32(.LowVectors) |
         SCTLR.DSSBS.asU32(.DisableMitigation));
     SCTLR.writeFrom(.r0);
-    asm volatile ("isb");
 
     arch.SetMode(.Monitor);
-    asm volatile ("isb");
 
     arch.LoadAddr(.r0, &_start);
     arch.VBAR.writeFrom(.r0);
     arch.MVBAR.writeFrom(.r0);
-    asm volatile ("isb");
 
     arch.SCTLR.I.Select(.Enabled);
-    asm volatile ("isb");
     arch.SCTLR.A.Select(.Enabled);
-    asm volatile ("isb");
 
     arch.SetValue(.r0, arch.SCR.ResetValue);
     arch.SCR.writeFrom(.r0);
-    asm volatile ("isb");
     arch.SCR.SIF.Select(.Enabled);
 
     asm volatile ("cpsie a");

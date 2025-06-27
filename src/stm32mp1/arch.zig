@@ -21,9 +21,6 @@ pub inline fn LoadAddr(comptime reg: armv7_general_register, address: anytype) v
 }
 
 const Mode = enum(u5) { Monitor = 0x16 };
-pub inline fn SetMode(comptime mode: Mode) void {
-    asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
-}
 
 pub const SCR = struct {
     const self = CP15Reg(0, 1, 1, 0, .ReadWrite);
@@ -92,7 +89,10 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
         }
         inline fn writeFrom(comptime access_reg: armv7_general_register) void {
             switch (rw) {
-                .ReadWrite => access(access_reg, .mcr),
+                .ReadWrite => {
+                    access(access_reg, .mcr);
+                    asm volatile ("isb");
+                },
                 .ReadOnly => @compileError("Register is ReadOnly"),
             }
         }
@@ -188,4 +188,8 @@ pub inline fn EndlessLoop() void {
         \\ nop
         \\ b . -2
     );
+}
+pub inline fn SetMode(comptime mode: Mode) void {
+    asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
+    asm volatile ("isb");
 }
