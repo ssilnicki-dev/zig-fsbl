@@ -1,103 +1,72 @@
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum(u4) { r0 = 0, r1 = 1 };
 
-pub inline fn goto(comptime func: anytype) void {
-    asm volatile ("b %[addr]"
-        :
-        : [addr] "i" (func),
-    );
-}
-
-pub inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32) void {
-    asm volatile (print("movw r{d}, #:lower16:{d}", .{ @intFromEnum(reg), value }));
-    asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
-}
-
-pub inline fn LoadAddr(comptime reg: armv7_general_register, address: anytype) void {
-    asm volatile (print("ldr r{d}, %[addr]", .{@intFromEnum(reg)})
-        :
-        : [addr] "i" (&address),
-    );
-}
-
 const Mode = enum(u5) { Monitor = 0x16 };
 
-pub const SCR = struct {
-    const self = CP15Reg(0, 1, 1, 0, .ReadWrite);
-    pub const SIF = self.Bit(9);
+const SCR = struct {
+    usingnamespace CP15Reg(0, 1, 1, 0, .ReadWrite);
+    pub const SIF = SCR.Bit(9);
     pub const ResetValue = 0;
-
-    pub const writeFrom = self.writeFrom;
 };
 
-pub const VBAR = struct {
-    const self = CP15Reg(0, 12, 0, 0, .ReadWrite);
-    pub const writeFrom = self.writeFrom;
+const VBAR = struct {
+    usingnamespace CP15Reg(0, 12, 0, 0, .ReadWrite);
 };
 
-pub const MVBAR = struct {
-    const self = CP15Reg(0, 12, 0, 1, .ReadWrite);
-    pub const writeFrom = self.writeFrom;
+const MVBAR = struct {
+    usingnamespace CP15Reg(0, 12, 0, 1, .ReadWrite);
 };
 
-pub const SCTLR = struct {
-    const self = CP15Reg(0, 1, 0, 0, .ReadWrite);
-    pub const DSSBS = self.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });
-    pub const TE = self.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 });
-    pub const EE = self.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 });
-    pub const V = self.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 });
-    pub const NTWE = self.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
-    pub const NTWI = self.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
-    pub const CP15BEN = self.Bit(5);
-    pub const A = self.Bit(1);
-    pub const I = self.Bit(12);
-    const ReservedBit23 = self.ReservedBit(23, 1); // aka SPAN
-    const ReservedBit22 = self.ReservedBit(22, 1); // RES1
-    const ReservedBit04 = self.ReservedBit(4, 1); // aka LSMAOE
-    const ReservedBit03 = self.ReservedBit(3, 1); // aka nTLSMD
+const SCTLR = struct {
+    usingnamespace CP15Reg(0, 1, 0, 0, .ReadWrite);
+    pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });
+    pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 });
+    pub const EE = SCTLR.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 });
+    pub const V = SCTLR.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 });
+    pub const NTWE = SCTLR.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
+    pub const NTWI = SCTLR.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
+    pub const CP15BEN = SCTLR.Bit(5);
+    pub const A = SCTLR.Bit(1);
+    pub const I = SCTLR.Bit(12);
+    const ReservedBit23 = SCTLR.ReservedBit(23, 1); // aka SPAN
+    const ReservedBit22 = SCTLR.ReservedBit(22, 1); // RES1
+    const ReservedBit04 = SCTLR.ReservedBit(4, 1); // aka LSMAOE
+    const ReservedBit03 = SCTLR.ReservedBit(3, 1); // aka nTLSMD
     pub const RES1 = ReservedBit23.asU32() | ReservedBit22.asU32() | ReservedBit04.asU32() | ReservedBit03.asU32();
-
-    pub const writeFrom = self.writeFrom;
 };
 
-pub const CPACR = struct {
-    const self = CP15Reg(0, 1, 0, 2, .ReadWrite);
-    pub const CP10 = self.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
-    pub const CP11 = self.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
-    pub const TRCDIS = self.Bit(28);
+const CPACR = struct {
+    usingnamespace CP15Reg(0, 1, 0, 2, .ReadWrite);
+    pub const CP10 = CPACR.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
+    pub const CP11 = CPACR.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
+    pub const TRCDIS = CPACR.Bit(28);
     pub const ResetValue = 0;
-
-    pub const writeFrom = self.writeFrom;
 };
 
-pub const NSACR = struct {
-    const self = CP15Reg(0, 1, 1, 2, .ReadWrite);
-    pub const AllCPAccessInNonSecureState = self.Field(0, 14, enum(u1) { Disabled = 0 });
-    pub const CP10 = self.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
-    pub const CP11 = self.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
-    const NSTRCDIS = self.Bit(20);
-
-    pub const writeFrom = self.writeFrom;
+const NSACR = struct {
+    usingnamespace CP15Reg(0, 1, 1, 2, .ReadWrite);
+    pub const AllCPAccessInNonSecureState = NSACR.Field(0, 14, enum(u1) { Disabled = 0 });
+    pub const CP10 = NSACR.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    pub const CP11 = NSACR.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    const NSTRCDIS = NSACR.Bit(20);
 };
 
-pub const ID_DFR0 = struct {
-    const self = CP15Reg(0, 0, 1, 2, .ReadOnly);
-    pub const CopTrc = self.Field(12, 4, enum(u4) { Implemented = 0b0001 });
+const ID_DFR0 = struct {
+    usingnamespace CP15Reg(0, 0, 1, 2, .ReadOnly);
+    pub const CopTrc = ID_DFR0.Field(12, 4, enum(u4) { Implemented = 0b0001 });
 };
 
-pub const FPEXC = struct {
-    const self = FPReg(.fpexc);
-    pub const VECITR = self.ReservedField(8, 3, 0b111);
-    pub const EN = self.Bit(30);
+const FPEXC = struct {
+    usingnamespace FPReg(.fpexc);
+    pub const VECITR = FPEXC.ReservedField(8, 3, 0b111);
+    pub const EN = FPEXC.Bit(30);
     pub const ResetValue = VECITR.asU32();
-
-    pub const writeFrom = self.writeFrom;
 };
 
 // TODO: add support for 64 bit width registers
 fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite }) type {
     return struct {
-        usingnamespace GenericAccessors(@This());
+        pub usingnamespace GenericAccessors(@This());
         inline fn readTo(comptime access_reg: armv7_general_register) void {
             access(access_reg, .mrc);
         }
@@ -148,7 +117,7 @@ fn GenericAccessors(self: type) type {
             };
         }
 
-        fn Bit(comptime bit: u5) type {
+        pub fn Bit(comptime bit: u5) type {
             return Field(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
         }
 
@@ -197,16 +166,89 @@ fn GenericAccessors(self: type) type {
     };
 }
 
-pub inline fn EndlessLoop() void {
-    asm volatile (
-        \\ nop
-        \\ b . -2
+inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32) void {
+    asm volatile (print("movw r{d}, #:lower16:{d}", .{ @intFromEnum(reg), value }));
+    asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
+}
+
+inline fn LoadAddr(comptime reg: armv7_general_register, address: anytype) void {
+    asm volatile (print("ldr r{d}, %[addr]", .{@intFromEnum(reg)})
+        :
+        : [addr] "i" (&address),
     );
 }
+
+pub inline fn EndlessLoop() void {
+    asm volatile ("nop");
+    asm volatile ("b . -2");
+}
+
+pub inline fn goto(comptime func: anytype) void {
+    asm volatile ("b %[addr]"
+        :
+        : [addr] "i" (func),
+    );
+}
+
 pub inline fn SetMode(comptime mode: Mode) void {
     asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
     asm volatile ("isb");
 }
+
+pub inline fn InitializeSystemControlRegister() void {
+    SetValue(.r0, SCTLR.RES1 |
+        SCTLR.NTWE.asU32(.NotTrapped) |
+        SCTLR.NTWI.asU32(.NotTrapped) |
+        SCTLR.CP15BEN.asU32(.Enabled) |
+        SCTLR.EE.asU32(.LittleEndian) |
+        SCTLR.TE.asU32(.ARM) |
+        SCTLR.V.asU32(.LowVectors) |
+        SCTLR.DSSBS.asU32(.DisableMitigation));
+    SCTLR.writeFrom(.r0);
+}
+
+pub inline fn InitializeExceptionVectorsTable(comptime addr: anytype) void {
+    LoadAddr(.r0, addr);
+    VBAR.writeFrom(.r0);
+    MVBAR.writeFrom(.r0);
+}
+
+pub inline fn EnableInstructionCache() void {
+    SCTLR.I.Select(.Enabled);
+}
+
+pub inline fn EnableAlignmentFaultChecking() void {
+    SCTLR.A.Select(.Enabled);
+}
+
+pub inline fn InitializeSecureConfigurationRegister() void {
+    SetValue(.r0, SCR.ResetValue);
+    SCR.writeFrom(.r0);
+    SCR.SIF.Select(.Enabled);
+}
+
+pub inline fn EnableAbortException() void {
+    asm volatile ("cpsie a");
+    asm volatile ("isb");
+}
+
+pub inline fn InitializeCoprocessors() void {
+    SetValue(.r0, NSACR.AllCPAccessInNonSecureState.asU32(.Disabled) |
+        NSACR.CP10.asU32(.AccessFromAnySecureState) |
+        NSACR.CP11.asU32(.AccessFromAnySecureState));
+    NSACR.writeFrom(.r0);
+    ID_DFR0.CopTrc.ifEqual(.Implemented, DisableNSAccessToTraceRegisters);
+
+    SetValue(.r0, CPACR.ResetValue |
+        CPACR.CP10.asU32(.Enabled) |
+        CPACR.CP11.asU32(.Enabled) |
+        CPACR.TRCDIS.asU32(.Disabled));
+    CPACR.writeFrom(.r0);
+
+    SetValue(.r0, FPEXC.ResetValue | FPEXC.EN.asU32(.Enabled));
+    FPEXC.writeFrom(.r0);
+}
+
 pub inline fn DisableNSAccessToTraceRegisters() void {
     NSACR.NSTRCDIS.Select(.Enabled);
 }
