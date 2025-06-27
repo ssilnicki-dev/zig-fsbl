@@ -1061,6 +1061,7 @@ const MPU = struct {
         }
     }
 
+    // TODO: refactor cycle counter usage as PerfMon counter blocking is enebled
     pub inline fn readCycleCounter(self: *const MPU) u32 {
         _ = &self;
         var value: u32 = undefined;

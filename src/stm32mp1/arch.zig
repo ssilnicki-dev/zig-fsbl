@@ -3,6 +3,12 @@ const armv7_general_register = enum(u4) { r0 = 0, r1 = 1 };
 
 const Mode = enum(u5) { Monitor = 0x16 };
 
+const PMCR = struct {
+    usingnamespace CP15Reg(0, 9, 12, 0, .ReadWrite);
+    pub const ResetValue = 0;
+    pub const DP = PMCR.Bit(5);
+};
+
 const SCR = struct {
     usingnamespace CP15Reg(0, 1, 1, 0, .ReadWrite);
     pub const SIF = SCR.Bit(9);
@@ -251,4 +257,9 @@ pub inline fn InitializeCoprocessors() void {
 
 pub inline fn DisableNSAccessToTraceRegisters() void {
     NSACR.NSTRCDIS.Select(.Enabled);
+}
+
+pub inline fn InitializePerformanceMonitorControlRegister() void {
+    SetValue(.r0, PMCR.ResetValue | PMCR.DP.asU32(.Enabled));
+    PMCR.writeFrom(.r0);
 }
