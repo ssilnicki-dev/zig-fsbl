@@ -64,6 +64,10 @@ pub const CPACR = struct {
     const self = CP15Reg(0, 1, 0, 2, .ReadWrite);
     pub const CP10 = self.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
     pub const CP11 = self.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
+    pub const TRCDIS = self.Bit(28);
+    pub const ResetValue = 0;
+
+    pub const writeFrom = self.writeFrom;
 };
 
 pub const NSACR = struct {
@@ -71,13 +75,23 @@ pub const NSACR = struct {
     pub const AllCPAccessInNonSecureState = self.Field(0, 14, enum(u1) { Disabled = 0 });
     pub const CP10 = self.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
     pub const CP11 = self.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    const NSTRCDIS = self.Bit(20);
 
     pub const writeFrom = self.writeFrom;
 };
 
+pub const ID_DFR0 = struct {
+    const self = CP15Reg(0, 0, 1, 2, .ReadOnly);
+    pub const CopTrc = self.Field(12, 4, enum(u4) { Implemented = 0b0001 });
+};
+
 pub const FPEXC = struct {
     const self = FPReg(.fpexc);
+    pub const VECITR = self.ReservedField(8, 3, 0b111);
     pub const EN = self.Bit(30);
+    pub const ResetValue = VECITR.asU32();
+
+    pub const writeFrom = self.writeFrom;
 };
 
 // TODO: add support for 64 bit width registers
@@ -192,4 +206,7 @@ pub inline fn EndlessLoop() void {
 pub inline fn SetMode(comptime mode: Mode) void {
     asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
     asm volatile ("isb");
+}
+pub inline fn DisableNSAccessToTraceRegisters() void {
+    NSACR.NSTRCDIS.Select(.Enabled);
 }

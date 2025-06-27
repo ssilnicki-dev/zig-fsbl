@@ -42,6 +42,20 @@ export fn Reset_Handler() callconv(.naked) void {
 
     asm volatile ("cpsie a");
     asm volatile ("isb");
+    const NSACR = arch.NSACR;
+    arch.SetValue(.r0, NSACR.AllCPAccessInNonSecureState.asU32(.Disabled) |
+        NSACR.CP10.asU32(.AccessFromAnySecureState) |
+        NSACR.CP11.asU32(.AccessFromAnySecureState));
+    NSACR.writeFrom(.r0);
+    arch.ID_DFR0.CopTrc.ifEqual(.Implemented, arch.DisableNSAccessToTraceRegisters);
+    const CPACR = arch.CPACR;
+    arch.SetValue(.r0, CPACR.ResetValue |
+        CPACR.CP10.asU32(.Enabled) |
+        CPACR.CP11.asU32(.Enabled) |
+        CPACR.TRCDIS.asU32(.Disabled));
+    CPACR.writeFrom(.r0);
+    arch.SetValue(.r0, arch.FPEXC.ResetValue | arch.FPEXC.EN.asU32(.Enabled));
+    arch.FPEXC.writeFrom(.r0);
 
     arch.EndlessLoop();
 }
