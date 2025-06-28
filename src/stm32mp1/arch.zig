@@ -1,7 +1,18 @@
+// Reference documentation: ARM DDI 0487 L.b
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum(u4) { r0 = 0, r1 = 1 };
 
 const Mode = enum(u5) { Monitor = 0x16 };
+
+const CPSR = struct { // Current Program Status Register: G8-11861
+    usingnamespace SysReg(.cpsr, .mrs, .msr);
+    pub const DIT = CPSR.Bit(21); // Data Independent Timing
+};
+
+const ID_PFR0 = struct { // Processor Feature Register 0: G8-12095
+    usingnamespace CP15Reg(0, 0, 1, 0, .ReadOnly);
+    pub const DIT = ID_PFR0.Field(24, 4, enum(u4) { Implemented = 0b001 }); // Data Independent Timing
+};
 
 const PMCR = struct {
     usingnamespace CP15Reg(0, 9, 12, 0, .ReadWrite);
@@ -268,4 +279,8 @@ pub inline fn InitializeCoprocessors() void {
 pub inline fn InitializePerformanceMonitorControlRegister() void {
     SetValue(.r0, PMCR.ResetValue | PMCR.DP.asU32(.Enabled));
     PMCR.writeFrom(.r0);
+}
+
+pub inline fn InitializeCurrentProgramStatusRegister() void {
+    ID_PFR0.DIT.ifEqual(.Implemented, CPSR.DIT.Select, .{.Enabled});
 }

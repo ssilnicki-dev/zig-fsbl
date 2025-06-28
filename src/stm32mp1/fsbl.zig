@@ -27,6 +27,7 @@ export fn Reset_Handler() callconv(.naked) void {
     arch.InitializeException(.Abort, .Enabled);
     arch.InitializeCoprocessors();
     arch.InitializePerformanceMonitorControlRegister();
+    arch.InitializeCurrentProgramStatusRegister();
 
     arch.EndlessLoop();
 }
