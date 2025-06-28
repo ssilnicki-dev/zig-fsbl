@@ -155,7 +155,7 @@ fn GenericAccessors(self: type) type {
                 pub inline fn asU32(comptime value: values) u32 {
                     return @as(u32, @intFromEnum(value)) << shift;
                 }
-                pub inline fn ifEqual(comptime cmp_value: anytype, proc: anytype) void {
+                pub inline fn ifEqual(comptime cmp_value: anytype, proc: anytype, comptime args: anytype) void {
                     readTo(.r0);
                     switch (@TypeOf(cmp_value)) {
                         @TypeOf(.@"enum") => SetValue(.r1, @intFromEnum(@as(values, cmp_value))),
@@ -164,7 +164,7 @@ fn GenericAccessors(self: type) type {
                     }
                     asm volatile ("cmp r0, r1");
                     asm volatile ("bne 1f");
-                    proc();
+                    @call(.always_inline, proc, args);
                     asm volatile ("1:");
                 }
             };
@@ -253,7 +253,7 @@ pub inline fn InitializeCoprocessors() void {
         NSACR.CP10.asU32(.AccessFromAnySecureState) |
         NSACR.CP11.asU32(.AccessFromAnySecureState));
     NSACR.writeFrom(.r0);
-    ID_DFR0.CopTrc.ifEqual(.Implemented, DisableNSAccessToTraceRegisters);
+    ID_DFR0.CopTrc.ifEqual(.Implemented, NSACR.NSTRCDIS.Select, .{.Enabled});
 
     SetValue(.r0, CPACR.ResetValue |
         CPACR.CP10.asU32(.Enabled) |
@@ -263,10 +263,6 @@ pub inline fn InitializeCoprocessors() void {
 
     SetValue(.r0, FPEXC.ResetValue | FPEXC.EN.asU32(.Enabled));
     FPEXC.writeFrom(.r0);
-}
-
-pub inline fn DisableNSAccessToTraceRegisters() void {
-    NSACR.NSTRCDIS.Select(.Enabled);
 }
 
 pub inline fn InitializePerformanceMonitorControlRegister() void {
