@@ -14,69 +14,69 @@ const ID_PFR0 = struct { // Processor Feature Register 0: G8-12095
     pub const DIT = ID_PFR0.Field(24, 4, enum(u4) { Implemented = 0b001 }); // Data Independent Timing
 };
 
-const PMCR = struct {
+const PMCR = struct { // Performance Monitor Control Register: G8-12525
     usingnamespace CP15Reg(0, 9, 12, 0, .ReadWrite);
+    pub const DP = PMCR.Bit(5); // Disable cycle counter when event counting Prohibited
     pub const ResetValue = 0;
-    pub const DP = PMCR.Bit(5);
 };
 
-const SCR = struct {
+const SCR = struct { // Secure Configuration Register: G8-12190
     usingnamespace CP15Reg(0, 1, 1, 0, .ReadWrite);
-    pub const SIF = SCR.Bit(9);
+    pub const SIF = SCR.Bit(9); // Secure Instruction Fetch
     pub const ResetValue = 0;
 };
 
-const VBAR = struct {
+const VBAR = struct { // Vector Base Address Register: G8-12321
     usingnamespace CP15Reg(0, 12, 0, 0, .ReadWrite);
 };
 
-const MVBAR = struct {
+const MVBAR = struct { // Monitor Vector Base Register: G8-12143
     usingnamespace CP15Reg(0, 12, 0, 1, .ReadWrite);
 };
 
-const SCTLR = struct {
+const SCTLR = struct { // System Control Register: G8-12196
     usingnamespace CP15Reg(0, 1, 0, 0, .ReadWrite);
-    pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 });
-    pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 });
-    pub const EE = SCTLR.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 });
-    pub const V = SCTLR.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 });
-    pub const NTWE = SCTLR.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
-    pub const NTWI = SCTLR.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 });
-    pub const CP15BEN = SCTLR.Bit(5);
-    pub const A = SCTLR.Bit(1);
-    pub const I = SCTLR.Bit(12);
+    pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 }); // Default Speculative Store Bypass Safe value on exception
+    pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 }); // T32 Exception Enable
+    pub const EE = SCTLR.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 }); // Endianess on Exception
+    pub const NTWE = SCTLR.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFE at EL0
+    pub const NTWI = SCTLR.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFI at EL0
+    pub const V = SCTLR.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 }); // Vectors bit
+    pub const I = SCTLR.Bit(12); // Instruction access Cacheability control, for accesses from EL1 and EL0
+    pub const CP15BEN = SCTLR.Bit(5); // System instruction memory barrier enable
+    pub const A = SCTLR.Bit(1); // Alignment ckeck enable
     const ReservedBit23 = SCTLR.ReservedBit(23, 1); // aka SPAN
     const ReservedBit22 = SCTLR.ReservedBit(22, 1); // RES1
     const ReservedBit04 = SCTLR.ReservedBit(4, 1); // aka LSMAOE
     const ReservedBit03 = SCTLR.ReservedBit(3, 1); // aka nTLSMD
-    pub const RES1 = ReservedBit23.asU32() | ReservedBit22.asU32() | ReservedBit04.asU32() | ReservedBit03.asU32();
+    pub const ResetValue = ReservedBit23.asU32() | ReservedBit22.asU32() | ReservedBit04.asU32() | ReservedBit03.asU32();
 };
 
-const CPACR = struct {
+const CPACR = struct { // Architectural Feature Access Control Register: G8-11852
     usingnamespace CP15Reg(0, 1, 0, 2, .ReadWrite);
     pub const CP10 = CPACR.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
     pub const CP11 = CPACR.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
-    pub const TRCDIS = CPACR.Bit(28);
+    pub const TRCDIS = CPACR.Bit(28); // Traps PL0 and PL1 access to all trace registers to Undefined Mode
     pub const ResetValue = 0;
 };
 
-const NSACR = struct {
+const NSACR = struct { // Non-Secure Access Control Register: G8-12162
     usingnamespace CP15Reg(0, 1, 1, 2, .ReadWrite);
     pub const AllCPAccessInNonSecureState = NSACR.Field(0, 14, enum(u1) { Disabled = 0 });
-    pub const CP10 = NSACR.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
-    pub const CP11 = NSACR.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 });
+    pub const CP10 = NSACR.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 }); //Defines access rights for SIMD and FP functionality
+    pub const CP11 = NSACR.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 }); // unused, must follow CP10
     const NSTRCDIS = NSACR.Bit(20);
 };
 
-const ID_DFR0 = struct {
+const ID_DFR0 = struct { // Debug Feature Register: G8-12037
     usingnamespace CP15Reg(0, 0, 1, 2, .ReadOnly);
-    pub const CopTrc = ID_DFR0.Field(12, 4, enum(u4) { Implemented = 0b0001 });
+    pub const CopTrc = ID_DFR0.Field(12, 4, enum(u4) { Implemented = 0b0001 }); // Support for System registers-based model, using registers in the coproc == 0b1110 encoding space
 };
 
-const FPEXC = struct {
+const FPEXC = struct { // Floating Point Excepion Register: G8-11910
     usingnamespace SysReg(.fpexc, .vmrs, .vmsr);
-    pub const VECITR = FPEXC.ReservedField(8, 3, 0b111);
-    pub const EN = FPEXC.Bit(30);
+    pub const VECITR = FPEXC.ReservedField(8, 3, 0b111); // Vector Iteration count
+    pub const EN = FPEXC.Bit(30); // Enable Access to SIMD and FP functionality
     pub const ResetValue = VECITR.asU32();
 };
 
@@ -213,7 +213,7 @@ pub inline fn SetMode(comptime mode: Mode) void {
 }
 
 pub inline fn InitializeSystemControlRegister() void {
-    SetValue(.r0, SCTLR.RES1 |
+    SetValue(.r0, SCTLR.ResetValue |
         SCTLR.NTWE.asU32(.NotTrapped) |
         SCTLR.NTWI.asU32(.NotTrapped) |
         SCTLR.CP15BEN.asU32(.Enabled) |
