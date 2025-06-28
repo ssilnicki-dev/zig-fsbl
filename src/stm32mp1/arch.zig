@@ -63,7 +63,7 @@ const ID_DFR0 = struct {
 };
 
 const FPEXC = struct {
-    usingnamespace FPReg(.fpexc);
+    usingnamespace SysReg(.fpexc, .vmrs, .vmsr);
     pub const VECITR = FPEXC.ReservedField(8, 3, 0b111);
     pub const EN = FPEXC.Bit(30);
     pub const ResetValue = VECITR.asU32();
@@ -92,14 +92,14 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
     };
 }
 
-fn FPReg(comptime register: @TypeOf(.@"enum")) type {
+fn SysReg(comptime register: @TypeOf(.@"enum"), comptime read_instruction: @TypeOf(.@"enum"), comptime write_instruction: @TypeOf(.@"enum")) type {
     return struct {
         usingnamespace GenericAccessors(@This());
         inline fn readTo(comptime access_reg: armv7_general_register) void {
-            asm volatile (print("vmrs r{d}, {s}", .{ @intFromEnum(access_reg), @tagName(register) }));
+            asm volatile (print("{s} r{d}, {s}", .{ @tagName(read_instruction), @intFromEnum(access_reg), @tagName(register) }));
         }
         inline fn writeFrom(comptime access_reg: armv7_general_register) void {
-            asm volatile (print("vmsr {s}, r{d}", .{ @tagName(register), @intFromEnum(access_reg) }));
+            asm volatile (print("{s} {s}, r{d}", .{ @tagName(write_instruction), @tagName(register), @intFromEnum(access_reg) }));
         }
     };
 }
