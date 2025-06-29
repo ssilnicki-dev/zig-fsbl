@@ -4,6 +4,12 @@ const armv7_general_register = enum(u4) { r0 = 0, r1 = 1 };
 
 const Mode = enum(u5) { Monitor = 0x16 };
 
+const MPIDR = struct { // Multiprocessor Affinity Register: G8-12140
+    usingnamespace CP15Reg(0, 0, 0, 5, .ReadOnly);
+    pub const Aff1 = MPIDR.Field(8, 8, enum(u8) { CLUSTER0 = 0 });
+    pub const Aff0 = MPIDR.Field(0, 8, enum(u8) { CPU0 = 0 });
+};
+
 const CPSR = struct { // Current Program Status Register: G8-11861
     usingnamespace SysReg(.cpsr, .mrs, .msr);
     pub const DIT = CPSR.Bit(21); // Data Independent Timing
@@ -286,4 +292,13 @@ pub inline fn InitializePerformanceMonitorControlRegister() void {
 
 pub inline fn InitializeCurrentProgramStatusRegister() void {
     ID_PFR0.DIT.If(.Equal, .Implemented, CPSR.DIT.Select, .{.Enabled});
+}
+
+inline fn SecondaryCpuColdBoot() void {
+    EndlessLoop();
+}
+
+pub inline fn PassOnlyPrimaryCpu() void {
+    MPIDR.Aff1.If(.NotEqual, .CLUSTER0, SecondaryCpuColdBoot, .{});
+    MPIDR.Aff0.If(.NotEqual, .CPU0, SecondaryCpuColdBoot, .{});
 }
