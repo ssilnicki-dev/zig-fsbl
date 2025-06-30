@@ -87,19 +87,26 @@ const FPEXC = struct { // Floating Point Excepion Register: G8-11910
 };
 
 // TODO: add support for 64 bit width registers
-fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite }) type {
+fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite, WriteOnly }) type {
     return struct {
         pub usingnamespace GenericAccessors(@This());
         inline fn readTo(comptime access_reg: armv7_general_register) void {
-            access(access_reg, .mrc);
+            switch (rw) {
+                .WriteOnly => {
+                    @compileError("Register is ReadOnly");
+                },
+                else => {
+                    access(access_reg, .mrc);
+                },
+            }
         }
         inline fn writeFrom(comptime access_reg: armv7_general_register) void {
             switch (rw) {
-                .ReadWrite => {
+                .ReadOnly => @compileError("Register is ReadOnly"),
+                else => {
                     access(access_reg, .mcr);
                     asm volatile ("isb");
                 },
-                .ReadOnly => @compileError("Register is ReadOnly"),
             }
         }
 
