@@ -100,7 +100,7 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
                 },
             }
         }
-        inline fn writeFrom(comptime access_reg: armv7_general_register) void {
+        inline fn writeFrom(access_reg: armv7_general_register) void {
             switch (rw) {
                 .ReadOnly => @compileError("Register is ReadOnly"),
                 else => {
@@ -122,7 +122,7 @@ fn SysReg(comptime register: @TypeOf(.@"enum"), comptime read_instruction: @Type
         inline fn readTo(comptime access_reg: armv7_general_register) void {
             asm volatile (print("{s} r{d}, {s}", .{ @tagName(read_instruction), @intFromEnum(access_reg), @tagName(register) }));
         }
-        inline fn writeFrom(comptime access_reg: armv7_general_register) void {
+        inline fn writeFrom(access_reg: armv7_general_register) void {
             asm volatile (print("{s} {s}, r{d}", .{ @tagName(write_instruction), @tagName(register), @intFromEnum(access_reg) }));
         }
     };
@@ -172,34 +172,27 @@ fn GenericAccessors(self: type) type {
                     asm volatile (print("bfc r{d}, #{d}, #{d} ", .{ @intFromEnum(data), shift, width }));
                     self.writeFrom(data);
                 }
-                pub inline fn readTo(comptime reg: armv7_general_register) void {
+                pub inline fn readTo(comptime reg: armv7_general_register) armv7_general_register {
                     self.readTo(reg);
                     asm volatile (print("ubfx r{d}, r{d}, {d}, {d}", .{ @intFromEnum(reg), @intFromEnum(reg), shift, width }));
+                    return reg;
                 }
                 pub inline fn asU32(comptime value: values) u32 {
                     return @as(u32, @intFromEnum(value)) << shift;
                 }
-                pub inline fn If(comptime condition: enum { Equal, NotEqual }, comptime cmp_value: anytype, proc: anytype, comptime args: anytype) void {
-                    readTo(.r0);
-                    _ = switch (@TypeOf(cmp_value)) {
-                        @TypeOf(.@"enum") => SetValue(.r1, @intFromEnum(@as(values, cmp_value))),
-                        comptime_int => SetValue(.r1, cmp_value),
-                        else => @compileError("unsupported value type"),
-                    };
-                    asm volatile ("cmp r0, r1");
-                    asm volatile (print("b{s} 1f", .{switch (condition) {
-                            .Equal => "ne",
-                            .NotEqual => "eq",
-                        }}));
-                    @call(.always_inline, proc, args);
-                    asm volatile ("1:");
+                pub inline fn If(comptime condition: anytype, comptime cmp_value: anytype, action: anytype, comptime action_argument: anytype) void {
+                    const reg = readTo(.r0);
+                    IF(reg, condition, switch (@TypeOf(cmp_value)) {
+                        @TypeOf(.@"enum") => @intFromEnum(@as(values, cmp_value)),
+                        else => cmp_value,
+                    }, action, action_argument);
                 }
             };
         }
     };
 }
 
-inline fn SetValue(comptime reg: armv7_general_register, comptime value: anytype) armv7_general_register {
+inline fn SET(comptime reg: armv7_general_register, comptime value: anytype) armv7_general_register {
     switch (@typeInfo(@TypeOf(value))) {
         .pointer => asm volatile (print("ldr {s}, %[addr]", .{@tagName(reg)})
             :
@@ -209,9 +202,73 @@ inline fn SetValue(comptime reg: armv7_general_register, comptime value: anytype
             asm volatile (print("movw {s}, #:lower16:{d}", .{ @tagName(reg), value }));
             asm volatile (print("movt {s}, #:upper16:{d}", .{ @tagName(reg), value }));
         },
-        else => @compileError("Unsupported value type"),
+        else => if (@TypeOf(value) == armv7_general_register) {
+            if (value != reg) {
+                asm volatile (print("mov {s}, {s}", .{ @tagName(reg), @tagName(value) }));
+            }
+        } else {
+            @compileError("Unsupported value type");
+        },
     }
     return reg;
+}
+
+inline fn SAVE(comptime size: enum { Byte, HalfWord, Register }, comptime reg: armv7_general_register, comptime address: armv7_general_register) void {
+    asm volatile (print("{s} {s}, [{s}]", .{ switch (size) {
+            .Byte => "strb",
+            .HalfWord => "strh",
+            .Register => "str",
+        }, @tagName(reg), @tagName(address) }));
+}
+
+inline fn DO(comptime op: enum { Add, Sub, LeftShift, ClearBits }, comptime reg: armv7_general_register, comptime arg: anytype) void {
+    const opcode = switch (op) {
+        .Add => "add",
+        .Sub => "sub",
+        .LeftShift => "lsl",
+        .ClearBits => "bic",
+    };
+    switch (@TypeOf(arg)) {
+        @Type(.enum_literal), armv7_general_register => asm volatile (print("{s} {s}, {s}, {s}", .{ opcode, @tagName(reg), @tagName(reg), @tagName(arg) })),
+        comptime_int => asm volatile (print("{s} {s}, {s}, #{d}", .{ opcode, @tagName(reg), @tagName(reg), arg })),
+        else => @compileError("Unsupported type or argument"),
+    }
+}
+
+inline fn LABEL(comptime name: comptime_int) void {
+    asm volatile (print("{d}:", .{name}));
+}
+
+inline fn IF(comptime reg: armv7_general_register, comptime condition: enum { Equal, NotEqual, LowerUnsigned }, comptime cmp_value: anytype, comptime action: anytype, comptime action_argument: anytype) void {
+    const tmp_reg = switch (@TypeOf(cmp_value)) {
+        @TypeOf(reg) => switch (cmp_value) {
+            reg => @compileError("Comparing register with ifself makes no sence"),
+            else => cmp_value,
+        },
+        else => switch (reg) {
+            .r0 => SET(.r1, cmp_value),
+            else => SET(.r0, cmp_value),
+        },
+    };
+    asm volatile (print("cmp {s}, {s}", .{ @tagName(reg), @tagName(tmp_reg) }));
+
+    const exit = 1 << 31;
+
+    asm volatile (print("b{s} {d}f", .{
+            switch (condition) {
+                .Equal => "ne",
+                .NotEqual => "eq",
+                .LowerUnsigned => "hs", // higher or same
+            },
+            exit,
+        }));
+
+    switch (@typeInfo(@TypeOf(action))) {
+        .comptime_int => asm volatile (print("b {d}{s}", .{ action, @tagName(action_argument) })),
+        .@"fn" => _ = @call(.always_inline, action, action_argument),
+        else => {},
+    }
+    LABEL(exit);
 }
 
 pub inline fn EndlessLoop() void {
@@ -232,19 +289,18 @@ pub inline fn SetMode(comptime mode: Mode) void {
 }
 
 pub inline fn InitializeSystemControlRegister() void {
-    const reg = SetValue(.r0, SCTLR.ResetValue |
+    SCTLR.writeFrom(SET(.r0, SCTLR.ResetValue |
         SCTLR.NTWE.asU32(.NotTrapped) |
         SCTLR.NTWI.asU32(.NotTrapped) |
         SCTLR.CP15BEN.asU32(.Enabled) |
         SCTLR.EE.asU32(.LittleEndian) |
         SCTLR.TE.asU32(.ARM) |
         SCTLR.V.asU32(.LowVectors) |
-        SCTLR.DSSBS.asU32(.DisableMitigation));
-    SCTLR.writeFrom(reg);
+        SCTLR.DSSBS.asU32(.DisableMitigation)));
 }
 
 pub inline fn InitializeExceptionVectorsTable(comptime addr: anytype) void {
-    const reg = SetValue(.r0, addr);
+    const reg = SET(.r0, addr);
     VBAR.writeFrom(reg);
     MVBAR.writeFrom(reg);
 }
@@ -258,8 +314,7 @@ pub inline fn InitializeAlignmentFaultChecking(comptime state: @TypeOf(.enum_int
 }
 
 pub inline fn InitializeSecureConfigurationRegister() void {
-    const reg = SetValue(.r0, SCR.ResetValue);
-    SCR.writeFrom(reg);
+    SCR.writeFrom(SET(.r0, SCR.ResetValue));
     SCR.SIF.Select(.Enabled);
 }
 
@@ -279,25 +334,22 @@ pub inline fn InitializeException(comptime exception: enum { Abort, IRQ, FIQ }, 
 }
 
 pub inline fn InitializeCoprocessors() void {
-    const reg0 = SetValue(.r0, NSACR.AllCPAccessInNonSecureState.asU32(.Disabled) |
+    NSACR.writeFrom(SET(.r0, NSACR.AllCPAccessInNonSecureState.asU32(.Disabled) |
         NSACR.CP10.asU32(.AccessFromAnySecureState) |
-        NSACR.CP11.asU32(.AccessFromAnySecureState));
-    NSACR.writeFrom(reg0);
+        NSACR.CP11.asU32(.AccessFromAnySecureState)));
+
     ID_DFR0.CopTrc.If(.Equal, .Implemented, NSACR.NSTRCDIS.Select, .{.Enabled});
 
-    const reg1 = SetValue(.r0, CPACR.ResetValue |
+    CPACR.writeFrom(SET(.r0, CPACR.ResetValue |
         CPACR.CP10.asU32(.Enabled) |
         CPACR.CP11.asU32(.Enabled) |
-        CPACR.TRCDIS.asU32(.Disabled));
-    CPACR.writeFrom(reg1);
+        CPACR.TRCDIS.asU32(.Disabled)));
 
-    const reg2 = SetValue(.r0, FPEXC.ResetValue | FPEXC.EN.asU32(.Enabled));
-    FPEXC.writeFrom(reg2);
+    FPEXC.writeFrom(SET(.r0, FPEXC.ResetValue | FPEXC.EN.asU32(.Enabled)));
 }
 
 pub inline fn InitializePerformanceMonitorControlRegister() void {
-    const reg = SetValue(.r0, PMCR.ResetValue | PMCR.DP.asU32(.Enabled));
-    PMCR.writeFrom(reg);
+    PMCR.writeFrom(SET(.r0, PMCR.ResetValue | PMCR.DP.asU32(.Enabled)));
 }
 
 pub inline fn InitializeCurrentProgramStatusRegister() void {
