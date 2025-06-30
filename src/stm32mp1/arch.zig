@@ -174,11 +174,11 @@ fn GenericAccessors(self: type) type {
                 }
                 pub inline fn If(comptime condition: enum { Equal, NotEqual }, comptime cmp_value: anytype, proc: anytype, comptime args: anytype) void {
                     readTo(.r0);
-                    switch (@TypeOf(cmp_value)) {
+                    _ = switch (@TypeOf(cmp_value)) {
                         @TypeOf(.@"enum") => SetValue(.r1, @intFromEnum(@as(values, cmp_value))),
                         comptime_int => SetValue(.r1, cmp_value),
                         else => @compileError("unsupported value type"),
-                    }
+                    };
                     asm volatile ("cmp r0, r1");
                     asm volatile (print("b{s} 1f", .{switch (condition) {
                             .Equal => "ne",
@@ -192,16 +192,19 @@ fn GenericAccessors(self: type) type {
     };
 }
 
-inline fn SetValue(comptime reg: armv7_general_register, comptime value: u32) void {
-    asm volatile (print("movw r{d}, #:lower16:{d}", .{ @intFromEnum(reg), value }));
-    asm volatile (print("movt r{d}, #:upper16:{d}", .{ @intFromEnum(reg), value }));
-}
-
-inline fn LoadAddr(comptime reg: armv7_general_register, address: anytype) void {
-    asm volatile (print("ldr r{d}, %[addr]", .{@intFromEnum(reg)})
-        :
-        : [addr] "i" (&address),
-    );
+inline fn SetValue(comptime reg: armv7_general_register, comptime value: anytype) armv7_general_register {
+    switch (@typeInfo(@TypeOf(value))) {
+        .pointer => asm volatile (print("ldr {s}, %[addr]", .{@tagName(reg)})
+            :
+            : [addr] "i" (&value),
+        ),
+        .int, .comptime_int => {
+            asm volatile (print("movw {s}, #:lower16:{d}", .{ @tagName(reg), value }));
+            asm volatile (print("movt {s}, #:upper16:{d}", .{ @tagName(reg), value }));
+        },
+        else => @compileError("Unsupported value type"),
+    }
+    return reg;
 }
 
 pub inline fn EndlessLoop() void {
@@ -222,7 +225,7 @@ pub inline fn SetMode(comptime mode: Mode) void {
 }
 
 pub inline fn InitializeSystemControlRegister() void {
-    SetValue(.r0, SCTLR.ResetValue |
+    const reg = SetValue(.r0, SCTLR.ResetValue |
         SCTLR.NTWE.asU32(.NotTrapped) |
         SCTLR.NTWI.asU32(.NotTrapped) |
         SCTLR.CP15BEN.asU32(.Enabled) |
@@ -230,26 +233,26 @@ pub inline fn InitializeSystemControlRegister() void {
         SCTLR.TE.asU32(.ARM) |
         SCTLR.V.asU32(.LowVectors) |
         SCTLR.DSSBS.asU32(.DisableMitigation));
-    SCTLR.writeFrom(.r0);
+    SCTLR.writeFrom(reg);
 }
 
 pub inline fn InitializeExceptionVectorsTable(comptime addr: anytype) void {
-    LoadAddr(.r0, addr);
-    VBAR.writeFrom(.r0);
-    MVBAR.writeFrom(.r0);
+    const reg = SetValue(.r0, addr);
+    VBAR.writeFrom(reg);
+    MVBAR.writeFrom(reg);
 }
 
-pub inline fn InitializeInstructionCache(comptime state: @TypeOf(.@"enum")) void {
+pub inline fn InitializeInstructionCache(comptime state: @TypeOf(.enum_internal)) void {
     SCTLR.I.Select(state);
 }
 
-pub inline fn InitializeAlignmentFaultChecking(comptime state: @TypeOf(.@"enum")) void {
+pub inline fn InitializeAlignmentFaultChecking(comptime state: @TypeOf(.enum_internal)) void {
     SCTLR.A.Select(state);
 }
 
 pub inline fn InitializeSecureConfigurationRegister() void {
-    SetValue(.r0, SCR.ResetValue);
-    SCR.writeFrom(.r0);
+    const reg = SetValue(.r0, SCR.ResetValue);
+    SCR.writeFrom(reg);
     SCR.SIF.Select(.Enabled);
 }
 
@@ -269,25 +272,25 @@ pub inline fn InitializeException(comptime exception: enum { Abort, IRQ, FIQ }, 
 }
 
 pub inline fn InitializeCoprocessors() void {
-    SetValue(.r0, NSACR.AllCPAccessInNonSecureState.asU32(.Disabled) |
+    const reg0 = SetValue(.r0, NSACR.AllCPAccessInNonSecureState.asU32(.Disabled) |
         NSACR.CP10.asU32(.AccessFromAnySecureState) |
         NSACR.CP11.asU32(.AccessFromAnySecureState));
-    NSACR.writeFrom(.r0);
+    NSACR.writeFrom(reg0);
     ID_DFR0.CopTrc.If(.Equal, .Implemented, NSACR.NSTRCDIS.Select, .{.Enabled});
 
-    SetValue(.r0, CPACR.ResetValue |
+    const reg1 = SetValue(.r0, CPACR.ResetValue |
         CPACR.CP10.asU32(.Enabled) |
         CPACR.CP11.asU32(.Enabled) |
         CPACR.TRCDIS.asU32(.Disabled));
-    CPACR.writeFrom(.r0);
+    CPACR.writeFrom(reg1);
 
-    SetValue(.r0, FPEXC.ResetValue | FPEXC.EN.asU32(.Enabled));
-    FPEXC.writeFrom(.r0);
+    const reg2 = SetValue(.r0, FPEXC.ResetValue | FPEXC.EN.asU32(.Enabled));
+    FPEXC.writeFrom(reg2);
 }
 
 pub inline fn InitializePerformanceMonitorControlRegister() void {
-    SetValue(.r0, PMCR.ResetValue | PMCR.DP.asU32(.Enabled));
-    PMCR.writeFrom(.r0);
+    const reg = SetValue(.r0, PMCR.ResetValue | PMCR.DP.asU32(.Enabled));
+    PMCR.writeFrom(reg);
 }
 
 pub inline fn InitializeCurrentProgramStatusRegister() void {
