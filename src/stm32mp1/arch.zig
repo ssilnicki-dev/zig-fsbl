@@ -1,8 +1,19 @@
 // Reference documentation: ARM DDI 0487 L.b
 const print = @import("std").fmt.comptimePrint;
-const armv7_general_register = enum(u4) { r0 = 0, r1 = 1 };
+const armv7_general_register = enum(u4) { r0 = 0, r1 = 1, r2 = 2, r3 = 3, r4 = 4, r5 = 5 };
+const cpu_word_size = 4;
 
 const Mode = enum(u5) { Monitor = 0x16 };
+
+const CTR = struct { // Cache Type Register: G8-11868
+    usingnamespace CP15Reg(0, 0, 0, 1, .ReadOnly);
+    pub const DminLine = CTR.Field(16, 4, enum {}); // Log2 of the number of words in the smallest cache line
+
+};
+
+const DCIMVAC = struct { // Data Cache line Invalidate by VA to Point of Coherency: G8-11883
+    usingnamespace CP15Reg(0, 7, 6, 1, .WriteOnly);
+};
 
 const MPIDR = struct { // Multiprocessor Affinity Register: G8-12140
     usingnamespace CP15Reg(0, 0, 0, 5, .ReadOnly);
@@ -363,4 +374,54 @@ inline fn SecondaryCpuColdBoot() void {
 pub inline fn PassOnlyPrimaryCpu() void {
     MPIDR.Aff1.If(.NotEqual, .CLUSTER0, SecondaryCpuColdBoot, .{});
     MPIDR.Aff0.If(.NotEqual, .CPU0, SecondaryCpuColdBoot, .{});
+}
+
+extern const rw_data_start: u32;
+extern const rw_data_size: u32;
+extern const bss_data_start: u32;
+extern const bss_data_size: u32;
+
+inline fn UpdateDataCache(comptime action: enum { Invalidate }, comptime base: anytype, comptime size: anytype) void {
+    const loop = 1;
+    const exit = 2;
+    const sys_reg = switch (action) {
+        .Invalidate => DCIMVAC,
+    };
+    const mem_size = SET(.r2, size);
+    IF(mem_size, .Equal, 0, exit, .f);
+    const mem_addr = SET(.r3, base);
+    DO(.Add, mem_size, mem_addr);
+    const mem_end = mem_size;
+    const data_cache_line_size = CTR.DminLine.readTo(.r4);
+    DO(.LeftShift, data_cache_line_size, cpu_word_size);
+    const mask = SET(.r5, data_cache_line_size);
+    DO(.Sub, mask, 1);
+    DO(.ClearBits, mem_addr, mask);
+    LABEL(loop);
+    sys_reg.writeFrom(mem_addr);
+    DO(.Add, mem_addr, data_cache_line_size);
+    IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
+    asm volatile ("dsb");
+    LABEL(exit);
+}
+
+inline fn ZeroMemory(comptime base: anytype, comptime size: anytype) void {
+    const loop = 1;
+    const exit = 2;
+    const mem_size = SET(.r2, size);
+    IF(mem_size, .Equal, 0, exit, .f);
+    const mem_addr = SET(.r3, base);
+    const mem_end = mem_size;
+    DO(.Add, mem_end, mem_addr);
+    const value = SET(.r4, 0);
+    LABEL(loop);
+    SAVE(.Byte, value, mem_addr);
+    DO(.Add, mem_addr, 1);
+    IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
+    LABEL(exit);
+}
+
+pub inline fn ResetMemory() void {
+    UpdateDataCache(.Invalidate, &rw_data_start, &rw_data_size);
+    ZeroMemory(&bss_data_start, &bss_data_size);
 }

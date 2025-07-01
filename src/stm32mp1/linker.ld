@@ -23,12 +23,16 @@ SECTIONS
     } > SYSRAM
 
     .data : ALIGN(4) {
+        PROVIDE(rw_data_start = .);
         *(.data)
+        PROVIDE(rw_data_size = . - rw_data_start);
     } > SYSRAM
 
     .bss : ALIGN(4) {
+        PROVIDE(bss_data_start = .);
         *(COMMON)
         *(.bss)
+        PROVIDE(bss_data_size = . - rw_data_start);
     } > SYSRAM
 
     /DISCARD/ : { *(.ARM.exidx*) }

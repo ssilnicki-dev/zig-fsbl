@@ -31,6 +31,8 @@ export fn Reset_Handler() callconv(.naked) void {
 
     arch.PassOnlyPrimaryCpu();
 
+    arch.ResetMemory();
+
     arch.EndlessLoop();
 }
 
