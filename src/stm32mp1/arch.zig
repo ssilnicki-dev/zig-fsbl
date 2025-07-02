@@ -1,6 +1,6 @@
 // Reference documentation: ARM DDI 0487 L.b
 const print = @import("std").fmt.comptimePrint;
-const armv7_general_register = enum(u4) { r0 = 0, r1 = 1, r2 = 2, r3 = 3, r4 = 4, r5 = 5 };
+const armv7_general_register = enum { r0, r1, r2, r3, r4, r5 };
 const cpu_word_size = 4;
 
 const Mode = enum(u5) { Monitor = 0x16 };
@@ -131,10 +131,10 @@ fn SysReg(comptime register: @TypeOf(.@"enum"), comptime read_instruction: @Type
     return struct {
         usingnamespace GenericAccessors(@This());
         inline fn readTo(comptime access_reg: armv7_general_register) void {
-            asm volatile (print("{s} r{d}, {s}", .{ @tagName(read_instruction), @intFromEnum(access_reg), @tagName(register) }));
+            asm volatile (print("{s} {s}, {s}", .{ @tagName(read_instruction), @tagName(access_reg), @tagName(register) }));
         }
         inline fn writeFrom(access_reg: armv7_general_register) void {
-            asm volatile (print("{s} {s}, r{d}", .{ @tagName(write_instruction), @tagName(register), @intFromEnum(access_reg) }));
+            asm volatile (print("{s} {s}, {s}", .{ @tagName(write_instruction), @tagName(register), @tagName(access_reg) }));
         }
     };
 }
