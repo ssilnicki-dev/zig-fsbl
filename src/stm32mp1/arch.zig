@@ -97,6 +97,10 @@ const FPEXC = struct { // Floating Point Excepion Register: G8-11910
     pub const ResetValue = VECITR.asU32();
 };
 
+const BSEC_DENABLE = struct {
+    usingnamespace PlatformReg(0x5C005014);
+};
+
 // TODO: add support for 64 bit width registers
 fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite, WriteOnly }) type {
     return struct {
@@ -135,6 +139,19 @@ fn SysReg(comptime register: @TypeOf(.@"enum"), comptime read_instruction: @Type
         }
         inline fn writeFrom(access_reg: armv7_general_register) void {
             asm volatile (print("{s} {s}, {s}", .{ @tagName(write_instruction), @tagName(register), @tagName(access_reg) }));
+        }
+    };
+}
+
+fn PlatformReg(addr: comptime_int) type {
+    return struct {
+        pub usingnamespace GenericAccessors(@This());
+        inline fn writeFrom(reg: armv7_general_register) void {
+            const tmp = switch (reg) {
+                .r0 => .r1,
+                else => .r0,
+            };
+            SAVE(.Word, reg, SET(tmp, addr));
         }
     };
 }
@@ -224,11 +241,11 @@ inline fn SET(comptime reg: armv7_general_register, comptime value: anytype) arm
     return reg;
 }
 
-inline fn SAVE(comptime size: enum { Byte, HalfWord, Register }, comptime reg: armv7_general_register, comptime address: armv7_general_register) void {
+inline fn SAVE(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7_general_register, address: armv7_general_register) void {
     asm volatile (print("{s} {s}, [{s}]", .{ switch (size) {
             .Byte => "strb",
             .HalfWord => "strh",
-            .Register => "str",
+            .Word => "str",
         }, @tagName(reg), @tagName(address) }));
 }
 
@@ -283,6 +300,11 @@ inline fn IF(comptime reg: armv7_general_register, comptime condition: enum { Eq
 }
 
 pub inline fn EndlessLoop() void {
+    asm volatile ("bl parkingLoop");
+    asm volatile ("nop");
+}
+
+export fn parkingLoop() callconv(.naked) void {
     asm volatile ("nop");
     asm volatile ("b . -2");
 }
@@ -294,7 +316,7 @@ pub inline fn goto(comptime func: anytype) void {
     );
 }
 
-pub inline fn SetMode(comptime mode: Mode) void {
+pub inline fn SetMode(mode: Mode) void {
     asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
     asm volatile ("isb");
 }
@@ -424,4 +446,8 @@ inline fn ZeroMemory(comptime base: anytype, comptime size: anytype) void {
 pub inline fn ResetMemory() void {
     UpdateDataCache(.Invalidate, &rw_data_start, &rw_data_size);
     ZeroMemory(&bss_data_start, &bss_data_size);
+}
+
+pub inline fn DebugMode() void {
+    BSEC_DENABLE.writeFrom(SET(.r0, 0x47f)); // enable full debug access
 }

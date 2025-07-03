@@ -18,6 +18,8 @@ export fn _start() callconv(.naked) void {
 }
 
 export fn Reset_Handler() callconv(.naked) void {
+    arch.DebugMode();
+
     arch.InitializeSystemControlRegister();
     arch.SetMode(.Monitor);
     arch.InitializeExceptionVectorsTable(&_start);
