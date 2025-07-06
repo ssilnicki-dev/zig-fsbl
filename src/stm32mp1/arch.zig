@@ -1,9 +1,15 @@
 // Reference documentation: ARM DDI 0487 L.b [#1]
+//                          ARM DDI 0464 E   [#2]
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum { r0, r1, r2, r3, r4, r5 };
 const cpu_word_size = 4;
 
 const Mode = enum(u5) { Monitor = 0x16 };
+
+const ACTLR = struct { // Auxilary Control Register: G8-11795[1], 4-59[2]
+    usingnamespace CP15Reg(0, 1, 0, 1, .ReadWrite);
+    pub const SMP = ACTLR.Bit(6); // Coherent requests to the processor
+};
 
 const CTR = struct { // Cache Type Register: G8-11868[1]
     usingnamespace CP15Reg(0, 0, 0, 1, .ReadOnly);
@@ -391,6 +397,10 @@ pub inline fn InitializeCurrentProgramStatusRegister() void {
 
 inline fn SecondaryCpuColdBoot() void {
     EndlessLoop();
+}
+
+pub inline fn EnableSMP() void {
+    ACTLR.SMP.Select(.Enabled);
 }
 
 pub inline fn PassOnlyPrimaryCpu() void {

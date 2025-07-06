@@ -21,6 +21,7 @@ export fn Reset_Handler() callconv(.naked) void {
     arch.DebugMode();
 
     arch.InitializeSystemControlRegister();
+    arch.EnableSMP();
     arch.SetMode(.Monitor);
     arch.InitializeExceptionVectorsTable(&_start);
     arch.InitializeInstructionCache(.Enabled);
