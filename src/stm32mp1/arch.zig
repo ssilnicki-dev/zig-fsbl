@@ -1,57 +1,57 @@
-// Reference documentation: ARM DDI 0487 L.b
+// Reference documentation: ARM DDI 0487 L.b [#1]
 const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum { r0, r1, r2, r3, r4, r5 };
 const cpu_word_size = 4;
 
 const Mode = enum(u5) { Monitor = 0x16 };
 
-const CTR = struct { // Cache Type Register: G8-11868
+const CTR = struct { // Cache Type Register: G8-11868[1]
     usingnamespace CP15Reg(0, 0, 0, 1, .ReadOnly);
     pub const DminLine = CTR.Field(16, 4, enum {}); // Log2 of the number of words in the smallest cache line
 
 };
 
-const DCIMVAC = struct { // Data Cache line Invalidate by VA to Point of Coherency: G8-11883
+const DCIMVAC = struct { // Data Cache line Invalidate by VA to Point of Coherency: G8-11883[1]
     usingnamespace CP15Reg(0, 7, 6, 1, .WriteOnly);
 };
 
-const MPIDR = struct { // Multiprocessor Affinity Register: G8-12140
+const MPIDR = struct { // Multiprocessor Affinity Register: G8-12140[1]
     usingnamespace CP15Reg(0, 0, 0, 5, .ReadOnly);
     pub const Aff1 = MPIDR.Field(8, 8, enum(u8) { CLUSTER0 = 0 });
     pub const Aff0 = MPIDR.Field(0, 8, enum(u8) { CPU0 = 0 });
 };
 
-const CPSR = struct { // Current Program Status Register: G8-11861
+const CPSR = struct { // Current Program Status Register: G8-11861[1]
     usingnamespace SysReg(.cpsr, .mrs, .msr);
     pub const DIT = CPSR.Bit(21); // Data Independent Timing
 };
 
-const ID_PFR0 = struct { // Processor Feature Register 0: G8-12095
+const ID_PFR0 = struct { // Processor Feature Register 0: G8-12095[1]
     usingnamespace CP15Reg(0, 0, 1, 0, .ReadOnly);
     pub const DIT = ID_PFR0.Field(24, 4, enum(u4) { Implemented = 0b001 }); // Data Independent Timing
 };
 
-const PMCR = struct { // Performance Monitor Control Register: G8-12525
+const PMCR = struct { // Performance Monitor Control Register: G8-12525[1]
     usingnamespace CP15Reg(0, 9, 12, 0, .ReadWrite);
     pub const DP = PMCR.Bit(5); // Disable cycle counter when event counting Prohibited
     pub const ResetValue = 0;
 };
 
-const SCR = struct { // Secure Configuration Register: G8-12190
+const SCR = struct { // Secure Configuration Register: G8-12190[1]
     usingnamespace CP15Reg(0, 1, 1, 0, .ReadWrite);
     pub const SIF = SCR.Bit(9); // Secure Instruction Fetch
     pub const ResetValue = 0;
 };
 
-const VBAR = struct { // Vector Base Address Register: G8-12321
+const VBAR = struct { // Vector Base Address Register: G8-12321[1]
     usingnamespace CP15Reg(0, 12, 0, 0, .ReadWrite);
 };
 
-const MVBAR = struct { // Monitor Vector Base Register: G8-12143
+const MVBAR = struct { // Monitor Vector Base Register: G8-12143[1]
     usingnamespace CP15Reg(0, 12, 0, 1, .ReadWrite);
 };
 
-const SCTLR = struct { // System Control Register: G8-12196
+const SCTLR = struct { // System Control Register: G8-12196[1]
     usingnamespace CP15Reg(0, 1, 0, 0, .ReadWrite);
     pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 }); // Default Speculative Store Bypass Safe value on exception
     pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 }); // T32 Exception Enable
@@ -69,7 +69,7 @@ const SCTLR = struct { // System Control Register: G8-12196
     pub const ResetValue = ReservedBit23.asU32() | ReservedBit22.asU32() | ReservedBit04.asU32() | ReservedBit03.asU32();
 };
 
-const CPACR = struct { // Architectural Feature Access Control Register: G8-11852
+const CPACR = struct { // Architectural Feature Access Control Register: G8-11852[1]
     usingnamespace CP15Reg(0, 1, 0, 2, .ReadWrite);
     pub const CP10 = CPACR.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
     pub const CP11 = CPACR.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
@@ -77,7 +77,7 @@ const CPACR = struct { // Architectural Feature Access Control Register: G8-1185
     pub const ResetValue = 0;
 };
 
-const NSACR = struct { // Non-Secure Access Control Register: G8-12162
+const NSACR = struct { // Non-Secure Access Control Register: G8-12162[1]
     usingnamespace CP15Reg(0, 1, 1, 2, .ReadWrite);
     pub const AllCPAccessInNonSecureState = NSACR.Field(0, 14, enum(u1) { Disabled = 0 });
     pub const CP10 = NSACR.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 }); //Defines access rights for SIMD and FP functionality
@@ -85,12 +85,12 @@ const NSACR = struct { // Non-Secure Access Control Register: G8-12162
     const NSTRCDIS = NSACR.Bit(20);
 };
 
-const ID_DFR0 = struct { // Debug Feature Register: G8-12037
+const ID_DFR0 = struct { // Debug Feature Register: G8-12037[1]
     usingnamespace CP15Reg(0, 0, 1, 2, .ReadOnly);
     pub const CopTrc = ID_DFR0.Field(12, 4, enum(u4) { Implemented = 0b0001 }); // Support for System registers-based model, using registers in the coproc == 0b1110 encoding space
 };
 
-const FPEXC = struct { // Floating Point Excepion Register: G8-11910
+const FPEXC = struct { // Floating Point Excepion Register: G8-11910[1]
     usingnamespace SysReg(.fpexc, .vmrs, .vmsr);
     pub const VECITR = FPEXC.ReservedField(8, 3, 0b111); // Vector Iteration count
     pub const EN = FPEXC.Bit(30); // Enable Access to SIMD and FP functionality
