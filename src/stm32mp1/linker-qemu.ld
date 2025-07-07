@@ -26,7 +26,7 @@ SECTIONS
         PROVIDE(bss_data_start = .);
         *(COMMON)
         *(.bss)
-        PROVIDE(bss_data_size = . - rw_data_start);
+        PROVIDE(bss_data_size = . - bss_data_start);
     } > SYSRAM
 
     /DISCARD/ : { *(.ARM.exidx*) }
