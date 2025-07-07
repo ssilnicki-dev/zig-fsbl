@@ -5,7 +5,7 @@ extern const stack_bottom_addr: u32;
 
 const goto = arch.goto;
 
-export fn _start() callconv(.naked) void {
+export fn ExceptionVectors() callconv(.naked) void {
     goto(Reset_Handler);
     goto(Undefined_Handler);
     goto(SWI_Handler);
@@ -23,7 +23,7 @@ export fn Reset_Handler() callconv(.naked) void {
     arch.InitializeSystemControlRegister();
     arch.EnableSMP();
     arch.SetMode(.Monitor);
-    arch.InitializeExceptionVectorsTable(&_start);
+    arch.InitializeExceptionVectorsTable(&ExceptionVectors);
     arch.InitializeInstructionCache(.Enabled);
     arch.InitializeAlignmentFaultChecking(.Enabled);
     arch.InitializeSecureConfigurationRegister();

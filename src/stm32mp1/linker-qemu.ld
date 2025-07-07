@@ -1,10 +1,4 @@
 OUTPUT_ARCH(arm)
-ENTRY(_start)
-
-
-BOOTROM_RESERVED_LENGTH = 0x2400;
-STM32_HEADER_LENGTH = 0x100;
-RESERVED_SYSRAM_LENGTH = BOOTROM_RESERVED_LENGTH + STM32_HEADER_LENGTH;
 
 MEMORY
 {
@@ -14,7 +8,7 @@ MEMORY
 SECTIONS
 {
     .text : ALIGN(4) {
-        KEEP(*(.text._start))
+        KEEP(*(.text.ExceptionVectors))
         *(.text)
     } > SYSRAM
 
