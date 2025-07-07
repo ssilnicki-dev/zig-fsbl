@@ -2,6 +2,25 @@
   "version": "0.2.0",
   "configurations": [
     {
+      "name": "Debug FSBL @ QEMU",
+      "type": "lldb-vscode",
+      "request": "attach",
+      "stopOnEntry": true,
+      "program": "${workspaceFolder}/zig-out/bin/qsmp-fsbl-qemu",
+          "initCommands": [
+            "shell pkill -f qemu-system-arm || true",
+            "shell daemon -- qemu-system-arm -machine virt,gic-version=max,secure=true,virtualization=true -smp 2,sockets=1,cores=2,threads=1 -cpu cortex-a7 -m 256K -nographic -s -S",
+          ],
+          "attachCommands": [
+            "file --arch armv7-none-none ${workspaceFolder}/zig-out/bin/qsmp-fsbl-qemu",
+            "gdb-remote 1234",
+            "target modules load --load --set-pc-to-entry --slide 0",
+          ],
+          "terminateCommands": [
+            "shell pkill -f qemu-system-arm || true",
+          ]
+    },
+    {
       "name": "Debug STM32MP1 FSBL",
       "type": "lldb-vscode",
       "request": "attach",
