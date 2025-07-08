@@ -226,7 +226,7 @@ fn GenericAccessors(self: type) type {
     };
 }
 
-inline fn SET(comptime reg: armv7_general_register, comptime value: anytype) armv7_general_register {
+inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_register {
     switch (@typeInfo(@TypeOf(value))) {
         .pointer => asm volatile (print("ldr {s}, %[addr]", .{@tagName(reg)})
             :
@@ -255,18 +255,32 @@ inline fn SAVE(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7
         }, @tagName(reg), @tagName(address) }));
 }
 
-inline fn DO(comptime op: enum { Add, Sub, LeftShift, ClearBits }, comptime reg: armv7_general_register, comptime arg: anytype) void {
+inline fn DO(comptime op: enum { Add, Sub, LeftShift, ClearBits, Mul }, reg: armv7_general_register, arg: anytype) void {
     const opcode = switch (op) {
         .Add => "add",
         .Sub => "sub",
         .LeftShift => "lsl",
         .ClearBits => "bic",
+        .Mul => "mul",
     };
     switch (@TypeOf(arg)) {
         @Type(.enum_literal), armv7_general_register => asm volatile (print("{s} {s}, {s}, {s}", .{ opcode, @tagName(reg), @tagName(reg), @tagName(arg) })),
         comptime_int => asm volatile (print("{s} {s}, {s}, #{d}", .{ opcode, @tagName(reg), @tagName(reg), arg })),
         else => @compileError("Unsupported type or argument"),
     }
+}
+
+inline fn ADD(reg: armv7_general_register, arg: anytype) armv7_general_register {
+    DO(.Add, reg, arg);
+    return reg;
+}
+inline fn SUB(reg: armv7_general_register, arg: anytype) armv7_general_register {
+    DO(.Sub, reg, arg);
+    return reg;
+}
+inline fn MUL(reg: armv7_general_register, arg: anytype) armv7_general_register {
+    DO(.Mul, reg, arg);
+    return reg;
 }
 
 inline fn LABEL(comptime name: comptime_int) void {
