@@ -345,6 +345,13 @@ pub inline fn goto(comptime func: anytype) void {
     );
 }
 
+pub inline fn call(comptime func: anytype) void {
+    asm volatile ("bl %[addr]"
+        :
+        : [addr] "i" (func),
+    );
+}
+
 pub inline fn SetMode(mode: Mode) void {
     switch (mode) {
         .Supervisor => {
