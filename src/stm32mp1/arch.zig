@@ -1,12 +1,18 @@
 // Reference documentation: ARM DDI 0487 L.b [#1]
 //                          ARM DDI 0464 E   [#2]
 const print = @import("std").fmt.comptimePrint;
-const armv7_general_register = enum { r0, r1, r2, r3, r4, r5 };
+const armv7_general_register = enum { r0, r1, r2, r3, r4, r5, sp };
 const cpu_word_size = 4;
+const platform_clusters = 1;
+const platform_cpus_per_cluster = 2;
 
 const Mode = enum(u5) {
+    Fiq = 0x11,
+    Irq = 0x12,
     Supervisor = 0x13,
     Monitor = 0x16,
+    Abort = 0x17,
+    Undefined = 0x1b,
 };
 
 const ACTLR = struct { // Auxilary Control Register: G8-11795[1], 4-59[2]
@@ -492,3 +498,42 @@ pub inline fn ResetMemory() void {
 pub inline fn DebugMode() void {
     BSEC_DENABLE.writeFrom(SET(.r0, 0x47f)); // enable full debug access
 }
+
+pub inline fn InitializeStacks() void {
+    const cpus_per_cluster = SET(.r0, platform_cpus_per_cluster);
+    const cpu_nr = MPIDR.Aff0.readTo(.r1);
+    const cluster_nr = MPIDR.Aff1.readTo(.r2);
+    const per_cpu_stack = SET(.r3, per_cpu_stacks_size);
+    const shift = MUL(ADD(cpu_nr, MUL(cpus_per_cluster, cluster_nr)), per_cpu_stack);
+    const stack_addr = ADD(SET(.r4, &platform_stacks), SET(.r5, @sizeOf(@TypeOf(platform_stacks))));
+
+    SetMode(.Supervisor); // TODO: implement PreserveMode and reimplement SetMode accouning a register as argument
+    _ = SET(.sp, SUB(stack_addr, shift));
+
+    SetMode(.Monitor);
+    _ = SET(.sp, SUB(stack_addr, svc_stack_size));
+
+    SetMode(.Irq);
+    _ = SET(.sp, SUB(stack_addr, mon_stack_size));
+
+    SetMode(.Fiq);
+    _ = SET(.sp, SUB(stack_addr, irq_stack_size));
+
+    SetMode(.Abort);
+    _ = SET(.sp, SUB(stack_addr, fiq_stack_size));
+
+    SetMode(.Undefined);
+    _ = SET(.sp, SUB(stack_addr, abt_stack_size));
+
+    SetMode(.Monitor);
+}
+
+const fiq_stack_size = 512;
+const irq_stack_size = 2048;
+const abt_stack_size = 1024;
+const und_stack_size = 1024;
+const mon_stack_size = 2048;
+const svc_stack_size = 8192;
+const per_cpu_stacks_size = fiq_stack_size + irq_stack_size + abt_stack_size + und_stack_size + mon_stack_size + svc_stack_size;
+
+const platform_stacks: [platform_clusters * platform_cpus_per_cluster * per_cpu_stacks_size]u8 align(8) linksection(".stack") = undefined;

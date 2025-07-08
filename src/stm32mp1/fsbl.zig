@@ -31,6 +31,7 @@ export fn Reset_Handler() callconv(.naked) void {
     arch.InitializeCoprocessors();
     arch.InitializePerformanceMonitorControlRegister();
     arch.InitializeCurrentProgramStatusRegister();
+    arch.InitializeStacks();
 
     arch.PassOnlyPrimaryCpu();
 

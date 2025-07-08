@@ -14,12 +14,17 @@ SECTIONS
 
     .rodata : ALIGN(4) {
         *(.rodata)
+        *(.rodata.*)
     } > SYSRAM
 
     .data : ALIGN(4) {
         PROVIDE(rw_data_start = .);
         *(.data)
         PROVIDE(rw_data_size = . - rw_data_start);
+    } > SYSRAM
+
+    .stack (NOLOAD) : ALIGN(4) {
+        KEEP(*(.stack));
     } > SYSRAM
 
     .bss : ALIGN(4) {
