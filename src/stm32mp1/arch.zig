@@ -4,7 +4,10 @@ const print = @import("std").fmt.comptimePrint;
 const armv7_general_register = enum { r0, r1, r2, r3, r4, r5 };
 const cpu_word_size = 4;
 
-const Mode = enum(u5) { Monitor = 0x16 };
+const Mode = enum(u5) {
+    Supervisor = 0x13,
+    Monitor = 0x16,
+};
 
 const ACTLR = struct { // Auxilary Control Register: G8-11795[1], 4-59[2]
     usingnamespace CP15Reg(0, 1, 0, 1, .ReadWrite);
@@ -337,8 +340,22 @@ pub inline fn goto(comptime func: anytype) void {
 }
 
 pub inline fn SetMode(mode: Mode) void {
-    asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
-    asm volatile ("isb");
+    switch (mode) {
+        .Supervisor => {
+            asm volatile ("adr r0, 1f");
+            asm volatile ("msr spsr_cxsf, #0xD3");
+            asm volatile ("mov lr, r0");
+            asm volatile ("isb");
+            asm volatile ("movs pc, lr");
+            asm volatile ("nop");
+            asm volatile ("nop");
+            asm volatile ("1:");
+        },
+        else => {
+            asm volatile (print("cps {d}", .{@intFromEnum(mode)}));
+            asm volatile ("isb");
+        },
+    }
 }
 
 pub inline fn InitializeSystemControlRegister() void {
