@@ -205,19 +205,19 @@ fn GenericAccessors(self: type) type {
                         Clear();
                     } else {
                         self.readTo(data);
-                        asm volatile (print("bfc r{d}, #{d}, #{d}", .{ @intFromEnum(data), shift, width }));
-                        asm volatile (print("orr r{d}, r{d}, #{d}", .{ @intFromEnum(data), @intFromEnum(data), v << shift }));
+                        asm volatile (print("bfc {s}, #{d}, #{d}", .{ @tagName(data), shift, width }));
+                        asm volatile (print("orr {s}, {s}, #{d}", .{ @tagName(data), @tagName(data), v << shift }));
                         self.writeFrom(data);
                     }
                 }
                 pub inline fn Clear() void {
                     self.readTo(data);
-                    asm volatile (print("bfc r{d}, #{d}, #{d} ", .{ @intFromEnum(data), shift, width }));
+                    asm volatile (print("bfc {s}, #{d}, #{d} ", .{ @tagName(data), shift, width }));
                     self.writeFrom(data);
                 }
                 pub inline fn readTo(comptime reg: armv7_general_register) armv7_general_register {
                     self.readTo(reg);
-                    asm volatile (print("ubfx r{d}, r{d}, {d}, {d}", .{ @intFromEnum(reg), @intFromEnum(reg), shift, width }));
+                    asm volatile (print("ubfx {s}, {s}, {d}, {d}", .{ @tagName(reg), @tagName(reg), shift, width }));
                     return reg;
                 }
                 pub inline fn asU32(comptime value: values) u32 {
