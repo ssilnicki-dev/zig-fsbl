@@ -35,7 +35,7 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         .strip = false,
         .unwind_tables = .none,
     });
-    fsbl_elf.entry = .{.symbol_name = "Reset_Handler"};
+    fsbl_elf.entry = .{.symbol_name = "EntryPoint"};
     fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker.ld" } });
     fsbl_elf.link_gc_sections = true;
     fsbl_elf.link_function_sections = true;

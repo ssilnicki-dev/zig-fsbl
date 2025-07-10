@@ -1,11 +1,14 @@
 const qsmp = @import("qsmp.zig");
 const arch = @import("arch.zig");
 
-extern const stack_bottom_addr: u32;
-
 const goto = arch.goto;
 
-export fn ExceptionVectors() callconv(.naked) void {
+export fn EntryPoint() callconv(.naked) void {
+    goto(Reset_Handler);
+}
+
+export fn ExceptionVectors() align(4096) callconv(.naked) void {
+    goto(Reset_Handler);
     goto(Reset_Handler);
     goto(Undefined_Handler);
     goto(SWI_Handler);
