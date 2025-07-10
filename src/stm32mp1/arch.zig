@@ -15,6 +15,160 @@ const Mode = enum(u5) {
     Undefined = 0x1b,
 };
 
+const MemoryAttribute = enum(u8) {
+    Device = Device_nGnRE,
+    NormalMemory = NonTransientMemWbWaRa + (NonTransientMemWbWaRa << 4),
+    NormalNonCacheableMemory = CacheDisabled + (CacheDisabled << 4),
+
+    const CacheWriteAllocate = 1;
+    const CacheReadAllocate = 1 << 1;
+    const CacheDisabled = 1 << 2;
+    const CacheNonTransient = 1 << 3;
+    const TransientMemWbWaRa = CacheDisabled + CacheWriteAllocate + CacheReadAllocate;
+    const NonCachable = CacheDisabled;
+    const TransientMemWbWa = CacheDisabled + CacheWriteAllocate;
+    const TransientMemWbRa = CacheDisabled + CacheReadAllocate;
+    const NonTransientMemWbWa = CacheDisabled + CacheWriteAllocate + CacheNonTransient;
+    const NonTransientMemWbWaRa = CacheDisabled + CacheWriteAllocate + CacheReadAllocate + CacheNonTransient;
+    const NonTransientMemWbRa = CacheDisabled + CacheReadAllocate + CacheNonTransient;
+    const TransientMemWtWa = CacheWriteAllocate;
+    const TransientMemWtWaRa = CacheWriteAllocate + CacheReadAllocate;
+    const TransientMemWtRa = CacheReadAllocate;
+    const NonTransientMemWtWa = CacheWriteAllocate + CacheNonTransient;
+    const NonTransientMemWtWaRa = CacheWriteAllocate + CacheReadAllocate + CacheNonTransient;
+    const NonTransientMemWtRa = CacheReadAllocate + CacheNonTransient;
+    const Device_nGnRnE = 0;
+    const Device_nGnRE = CacheDisabled;
+    const Device_nGRE = CacheNonTransient;
+    const Device_GRE = CacheDisabled + CacheNonTransient;
+    pub fn asLongDescriptorField(comptime self: MemoryAttribute) u64 {
+        return @as(u64, MAIR.GetIndex(self)) << 2;
+    }
+};
+
+const MAIR = struct {
+    pub const AttrIndexIntType = u3;
+    const MAIR0 = struct { // Memory Attribute Indirection Register 0: G8-12129[1]
+        usingnamespace CP15Reg(0, 10, 2, 0, .ReadWrite);
+    };
+
+    const MAIR1 = struct { // Memory Attribute Indirection Register 1: G8-12133[1]
+        usingnamespace CP15Reg(0, 10, 2, 1, .ReadWrite);
+    };
+    const Attr0 = MAIR0.Field(0, 8, MemoryAttribute); // Attribute 0
+    const Attr1 = MAIR0.Field(8, 8, MemoryAttribute); // ...
+    const Attr2 = MAIR0.Field(16, 8, MemoryAttribute);
+    const Attr3 = MAIR0.Field(24, 8, MemoryAttribute);
+    const Attr4 = MAIR1.Field(0, 8, MemoryAttribute);
+    const Attr5 = MAIR1.Field(8, 8, MemoryAttribute);
+    const Attr6 = MAIR1.Field(16, 8, MemoryAttribute);
+    const Attr7 = MAIR1.Field(24, 8, MemoryAttribute);
+    pub inline fn Reset() void {
+        const reset = SET(.r0, 0);
+        MAIR0.writeFrom(reset);
+        MAIR1.writeFrom(reset);
+    }
+
+    fn isMatch(comptime field: anytype, comptime attr: MemoryAttribute) bool {
+        return switch (field.Read()) {
+            0 => brk: {
+                field.Select(attr);
+                break :brk true;
+            },
+            @intFromEnum(attr) => true,
+            else => false,
+        };
+    }
+
+    pub fn GetIndex(comptime attr: MemoryAttribute) AttrIndexIntType {
+        if (@intFromEnum(attr) == 0) {
+            Attr0.Set(0);
+            return 0;
+        }
+        if (isMatch(Attr1, attr)) return 1;
+        if (isMatch(Attr2, attr)) return 2;
+        if (isMatch(Attr3, attr)) return 3;
+        if (isMatch(Attr4, attr)) return 4;
+        if (isMatch(Attr5, attr)) return 5;
+        if (isMatch(Attr6, attr)) return 6;
+        if (isMatch(Attr7, attr)) return 7;
+        unreachable; // FIXME?
+    }
+};
+
+fn TTBR(namespace: anytype) type {
+    return struct {
+        usingnamespace namespace;
+        const self = @This();
+        // When TTBCR.EAE = 0. Unused alternative
+        const TTB = undefined; // Translation table base address.
+        const IRGN0 = undefined; // Inner region cacheability
+        const IRGN1 = undefined; // Inner region cacheability
+        const NOS = undefined; // Not Outer Shareable
+        const RGN = undefined; // Outer cacheability
+        const S = undefined; // Shareable
+        // When TTBCR.EAE = 1
+        pub const ASID = self.ExtendedField(48, 8, enum {}); // Address Space Identifier
+        pub const BADDR = self.ExtendedField(1, 47, enum {}); // Translation table base address. NOTE: meaningful bits are tuneable!
+        pub const CnP = self.ExtendedBit(0); // Common not Private
+
+        pub inline fn Reset() void {
+            _ = SET(.r0, 0);
+            _ = SET(.r1, 0);
+            self.writeFrom(.{ .r0, .r1 });
+        }
+    };
+}
+
+const TTBR0 = TTBR(CP15Reg(0, 2, 0, 0, .ReadWrite)); // Translation Table Base Register 0: G8-12307[1]
+const TTBR1 = undefined; // Translation Table Base Register 1: G8-12314[1]
+
+const TTBCR = struct { // Translation Table Base Control Register: G8-12293[1]
+    usingnamespace CP15Reg(0, 2, 0, 2, .ReadWrite);
+    pub const EAE = TTBCR.Bit(31); // Extended Address Enable
+    // When TTBCR.EAE = 0. Unused alternative
+    const PD1 = undefined; // Translation table walk disable for translating using TTBR1
+    const PD0 = undefined; // Translation table walk disable for translating using TTBR0
+    const N = undefined; // Width of base address in TTBR0 & TTBR1
+    // When TTBCR.EAE = 1
+    const SH1 = undefined; // Shareability attribute for memory associated with translation table walks using TTBR1
+    const ORGN1 = undefined; // Outer cacheability attribute for memory associated with translation table walks using TTBR1
+    const IRGN1 = undefined; // Inner cacheability attribute for memory associated with translation table walks using TTBR1
+    pub const EPD1 = TTBCR.Bit(23); // Translation table walk disable for translations using TTBR1
+    pub const A1 = TTBCR.Field(22, 1, enum(u1) { ASIDfromTTBR0 = 0, ASIDfromTTBR1 = 1 }); // Selects whether TTBR0 or TTBR1 defines the ASID
+    pub const TSZ = enum(u6) { // address ranges. See G5.5.5 (G5-11652[1])
+        TTBR0_4GB = 0,
+        TTBR0_2GB = 1,
+        TTBR0_1GB = 2,
+        TTBR0_512MB = 3,
+        TTBR0_256MB = 4,
+        TTBR0_128MB = 5,
+        TTBR0_64MB = 6,
+        TTBR0_32MB = 7,
+        // Input address ranges & sizes, translated using TTBR0 and TTBR1
+        const T1SZ = TTBCR.Field(16, 3, enum {});
+        const T0SZ = TTBCR.Field(0, 3, enum {});
+        pub inline fn Select(comptime range: @This()) void {
+            T0SZ.Set(@intFromEnum(range) & 0b111);
+            T1SZ.Set(@intFromEnum(range) >> 3);
+        }
+        pub inline fn asU32(comptime range: @This()) u32 {
+            return (@as(u32, @intFromEnum(range)) & 0b111) | ((@as(u32, @intFromEnum(range)) >> 3) << 16);
+        }
+    };
+    pub const SH0 = TTBCR.Field(12, 3, enum(u3) { NonShareable = 0, OuterShareable = 1, InnerShareable = 3 }); // Shareability attribute for memory associated with translation table walks using TTBR0
+    const CacheAbility = enum(u2) { NonCacheable = 0, WbRaWaCacheable = 1, WtRaCacheable = 2, WbRaCacheable = 3 };
+    pub const ORGN0 = TTBCR.Field(10, 2, CacheAbility); // Outer cacheability attribute for memory associated with translation table walks using TTBR0
+    pub const IRGN0 = TTBCR.Field(8, 2, CacheAbility); // Inner cacheability attribute for memory associated with translation table walks using TTBR0
+    pub const EPD0 = TTBCR.Bit(7); // Translation table walk disable for translations using TTBR0
+    pub const T2E = TTBCR.Bit(6); // TTBCR2 Enable
+
+    pub inline fn Reset() void {
+        const reset = SET(.r0, 0);
+        TTBCR.writeFrom(reset);
+    }
+};
+
 const ACTLR = struct { // Auxilary Control Register: G8-11795[1], 4-59[2]
     usingnamespace CP15Reg(0, 1, 0, 1, .ReadWrite);
     pub const SMP = ACTLR.Bit(6); // Coherent requests to the processor
@@ -290,10 +444,24 @@ fn GenericAccessors(self: type) type {
         fn Field(comptime shift: u5, comptime width: u5, comptime values: @TypeOf(enum {})) type {
             _ = comptime (shift + (width - 1)); // check Field declaration sanity
             return struct {
+                pub const IntType = @Type(@import("std").builtin.Type{ .int = .{ .bits = width, .signedness = .unsigned } });
+                const max = (1 << width) - 1;
+                const mask: u32 = max << shift;
+                pub fn Read() IntType {
+                    var value: u32 = undefined;
+                    self.readTo(r0);
+                    asm volatile (
+                        \\ mov %[value], r0
+                        : [value] "=r" (value),
+                        :
+                        : "r0", "cc"
+                    );
+                    return @truncate((value & mask) >> shift);
+                }
                 pub inline fn Select(comptime v: values) void {
                     Set(@intFromEnum(v));
                 }
-                pub inline fn Set(comptime v: u31) void {
+                pub inline fn Set(comptime v: u32) void {
                     if (v == 0) {
                         Clear();
                     } else {
