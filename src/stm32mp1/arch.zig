@@ -116,32 +116,51 @@ const BSEC_DENABLE = struct {
     usingnamespace PlatformReg(0x5C005014);
 };
 
-// TODO: add support for 64 bit width registers
 fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite, WriteOnly }) type {
     return struct {
         pub usingnamespace GenericAccessors(@This());
-        inline fn readTo(comptime access_reg: armv7_general_register) void {
+        inline fn readTo(comptime access_reg: anytype) void {
             switch (rw) {
                 .WriteOnly => {
                     @compileError("Register is ReadOnly");
                 },
                 else => {
-                    access(access_reg, .mrc);
+                    const instruction = switch (@TypeOf(access_reg)) {
+                        armv7_general_register => .mrc,
+                        else => .mrrc,
+                    };
+                    access(access_reg, instruction);
                 },
             }
         }
-        inline fn writeFrom(access_reg: armv7_general_register) void {
+        inline fn writeFrom(access_reg: anytype) void {
             switch (rw) {
                 .ReadOnly => @compileError("Register is ReadOnly"),
                 else => {
-                    access(access_reg, .mcr);
+                    const instruction = switch (@TypeOf(access_reg)) {
+                        armv7_general_register => .mcr,
+                        else => .mcrr,
+                    };
+                    access(access_reg, instruction);
                     asm volatile ("isb");
                 },
             }
         }
 
-        inline fn access(comptime access_reg: armv7_general_register, comptime instruction: @TypeOf(.@"enum")) void {
-            asm volatile (print("{s} p15, {d}, r{d}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @intFromEnum(access_reg), crn, crm, op2 }));
+        inline fn access(comptime access_reg: anytype, comptime instruction: @TypeOf(.@"enum")) void {
+            switch (@TypeOf(access_reg)) {
+                armv7_general_register => asm volatile (print("{s} p15, {d}, {s}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @tagName(access_reg), crn, crm, op2 })),
+                else => {
+                    comptime if ((@intFromEnum(@as(armv7_general_register, access_reg[0])) == @intFromEnum(@as(armv7_general_register, access_reg[1]))) or
+                        (@import("std").mem.eql(u8, @tagName(access_reg[0]), "r15")) or
+                        (@import("std").mem.eql(u8, @tagName(access_reg[1]), "r15")))
+                    {
+                        @compileLog(print("Unsupported registers as arguments: {s}, {s}", .{ @tagName(access_reg[0]), @tagName(access_reg[1]) }));
+                    };
+                    // BUG: parameters untested for the whole range of 64 bit registers for aarch32
+                    asm volatile (print("{s} p15, {d}, {s}, {s}, c{d}", .{ @tagName(instruction), op2, @tagName(access_reg[1]), @tagName(access_reg[0]), crn }));
+                },
+            }
         }
     };
 }
@@ -190,6 +209,80 @@ fn GenericAccessors(self: type) type {
             };
         }
 
+        pub fn ExtendedBit(comptime bit: u6) type {
+            return ExtendedField(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
+        }
+
+        fn ExtendedField(comptime shift: u8, comptime width: u8, comptime values: @TypeOf(enum {})) type {
+            const max = (1 << width) - 1;
+            const mask: u64 = max << shift;
+            const register_max_bits = 64;
+            comptime if (shift + width > register_max_bits) {
+                @compileError("field declaration error");
+            };
+            return struct {
+                pub const IntType = @Type(@import("std").builtin.Type{ .int = .{ .bits = width, .signedness = .unsigned } });
+                pub inline fn Select(comptime v: values) void {
+                    Write(v);
+                }
+                pub fn Write(value: anytype) void {
+                    var unsigned_value: u64 = switch (@TypeOf(value)) {
+                        comptime_int => brk: {
+                            if (value > max) {
+                                @compileError(print("value {d} does not fit field space", .{value}));
+                            }
+                            break :brk value;
+                        },
+                        IntType => brk: {
+                            break :brk value;
+                        },
+                        @TypeOf(.enum_enternal) => @intFromEnum(@as(values, value)),
+                        values => @intFromEnum(value),
+                        else => @compileError(print("value type unsupported: {s}. Expected: comptime_int, {s} or {s}", .{ @typeName(@TypeOf(value)), @typeName(values), @typeName(IntType) })),
+                    };
+                    unsigned_value <<= shift;
+                    var reg = readRegister();
+                    reg &= ~mask;
+                    reg |= unsigned_value;
+                    const lo: u32 = @truncate(reg);
+                    const hi: u32 = @intCast(reg >> 32);
+                    asm volatile ("push {r0, r1}");
+                    asm volatile (
+                        \\ mov r0, %[low]
+                        \\ mov r1, %[high]
+                        :
+                        : [low] "r" (lo),
+                          [high] "r" (hi),
+                        : "r0", "r1", "cc"
+                    );
+                    self.writeFrom(.{ .r0, .r1 });
+                    asm volatile ("pop {r0, r1}");
+                }
+                pub fn Read() IntType {
+                    return @truncate((readRegister() & mask) >> shift);
+                }
+                pub inline fn asU64(comptime value: values) u64 {
+                    return @as(u64, @intFromEnum(value)) << shift;
+                }
+                fn readRegister() u64 {
+                    var lo: u32 = undefined;
+                    var hi: u32 = undefined;
+                    asm volatile ("push {r0, r1}");
+                    self.readTo(.{ .r0, .r1 });
+                    asm volatile (
+                        \\ mov %[low], r0
+                        \\ mov %[high], r1
+                        : [low] "=r" (lo),
+                          [high] "=r" (hi),
+                        :
+                        : "r0", "r1", "cc"
+                    );
+                    asm volatile ("pop {r0, r1}");
+                    return (@as(u64, @intCast(hi)) << 32) + lo;
+                }
+            };
+        }
+
         pub fn Bit(comptime bit: u5) type {
             return Field(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
         }
@@ -224,7 +317,7 @@ fn GenericAccessors(self: type) type {
                     return @as(u32, @intFromEnum(value)) << shift;
                 }
                 pub inline fn If(comptime condition: anytype, comptime cmp_value: anytype, action: anytype, comptime action_argument: anytype) void {
-                    const reg = readTo(.r0);
+                    const reg = readTo(data);
                     IF(reg, condition, switch (@TypeOf(cmp_value)) {
                         @TypeOf(.@"enum") => @intFromEnum(@as(values, cmp_value)),
                         else => cmp_value,
