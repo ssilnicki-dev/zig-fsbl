@@ -303,7 +303,10 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
 
         inline fn access(comptime access_reg: anytype, comptime instruction: @TypeOf(.@"enum")) void {
             switch (@TypeOf(access_reg)) {
-                armv7_general_register => asm volatile (print("{s} p15, {d}, {s}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @tagName(access_reg), crn, crm, op2 })),
+                armv7_general_register => {
+                    asm volatile (print("{s} p15, {d}, {s}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @tagName(access_reg), crn, crm, op2 }));
+                    addRegClobber(access_reg);
+                },
                 else => {
                     comptime if ((@intFromEnum(@as(armv7_general_register, access_reg[0])) == @intFromEnum(@as(armv7_general_register, access_reg[1]))) or
                         (@import("std").mem.eql(u8, @tagName(access_reg[0]), "r15")) or
@@ -312,7 +315,9 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
                         @compileLog(print("Unsupported registers as arguments: {s}, {s}", .{ @tagName(access_reg[0]), @tagName(access_reg[1]) }));
                     };
                     // BUG: parameters untested for the whole range of 64 bit registers for aarch32
-                    asm volatile (print("{s} p15, {d}, {s}, {s}, c{d}", .{ @tagName(instruction), op2, @tagName(access_reg[1]), @tagName(access_reg[0]), crn }));
+                    asm volatile (print("{s} p15, {d}, {s}, {s}, c{d}", .{ @tagName(instruction), op2, @tagName(access_reg[0]), @tagName(access_reg[1]), crn }));
+                    addRegClobber(access_reg[0]);
+                    addRegClobber(access_reg[1]);
                 },
             }
         }
@@ -346,8 +351,6 @@ fn PlatformReg(addr: comptime_int) type {
 
 fn GenericAccessors(self: type) type {
     return struct {
-        const data = armv7_general_register.r0;
-
         fn ReservedBit(comptime shift: u5, comptime value: u1) type {
             return ReservedField(shift, 1, value);
         }
@@ -380,7 +383,7 @@ fn GenericAccessors(self: type) type {
                     Write(v);
                 }
                 pub fn Write(value: anytype) void {
-                    var unsigned_value: u64 = switch (@TypeOf(value)) {
+                    var u64_value: u64 = switch (@TypeOf(value)) {
                         comptime_int => brk: {
                             if (value > max) {
                                 @compileError(print("value {d} does not fit field space", .{value}));
@@ -394,19 +397,17 @@ fn GenericAccessors(self: type) type {
                         values => @intFromEnum(value),
                         else => @compileError(print("value type unsupported: {s}. Expected: comptime_int, {s} or {s}", .{ @typeName(@TypeOf(value)), @typeName(values), @typeName(IntType) })),
                     };
-                    unsigned_value <<= shift;
+                    u64_value <<= shift;
                     var reg = readRegister();
                     reg &= ~mask;
-                    reg |= unsigned_value;
-                    const lo: u32 = @truncate(reg);
-                    const hi: u32 = @intCast(reg >> 32);
-                    asm volatile ("push {r0, r1}");
+                    reg |= u64_value;
                     asm volatile (
+                        \\ push {r0, r1}
                         \\ mov r0, %[low]
                         \\ mov r1, %[high]
                         :
-                        : [low] "r" (lo),
-                          [high] "r" (hi),
+                        : [low] "r" (@as(u32, @truncate(reg))),
+                          [high] "r" (@as(u32, @intCast(reg >> 32))),
                         : "r0", "r1", "cc"
                     );
                     self.writeFrom(.{ .r0, .r1 });
@@ -441,6 +442,7 @@ fn GenericAccessors(self: type) type {
             return Field(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
         }
 
+        const r0 = armv7_general_register.r0;
         fn Field(comptime shift: u5, comptime width: u5, comptime values: @TypeOf(enum {})) type {
             _ = comptime (shift + (width - 1)); // check Field declaration sanity
             return struct {
@@ -465,16 +467,16 @@ fn GenericAccessors(self: type) type {
                     if (v == 0) {
                         Clear();
                     } else {
-                        self.readTo(data);
-                        asm volatile (print("bfc {s}, #{d}, #{d}", .{ @tagName(data), shift, width }));
-                        asm volatile (print("orr {s}, {s}, #{d}", .{ @tagName(data), @tagName(data), v << shift }));
-                        self.writeFrom(data);
+                        self.readTo(r0);
+                        asm volatile (print("bfc {s}, #{d}, #{d}", .{ @tagName(r0), shift, width }));
+                        asm volatile (print("orr {s}, {s}, #{d}", .{ @tagName(r0), @tagName(r0), v << shift }));
+                        self.writeFrom(r0);
                     }
                 }
                 pub inline fn Clear() void {
-                    self.readTo(data);
-                    asm volatile (print("bfc {s}, #{d}, #{d} ", .{ @tagName(data), shift, width }));
-                    self.writeFrom(data);
+                    self.readTo(r0);
+                    asm volatile (print("bfc {s}, #{d}, #{d} ", .{ @tagName(r0), shift, width }));
+                    self.writeFrom(r0);
                 }
                 pub inline fn readTo(comptime reg: armv7_general_register) armv7_general_register {
                     self.readTo(reg);
@@ -485,7 +487,7 @@ fn GenericAccessors(self: type) type {
                     return @as(u32, @intFromEnum(value)) << shift;
                 }
                 pub inline fn If(comptime condition: anytype, comptime cmp_value: anytype, action: anytype, comptime action_argument: anytype) void {
-                    const reg = readTo(data);
+                    const reg = readTo(r0);
                     IF(reg, condition, switch (@TypeOf(cmp_value)) {
                         @TypeOf(.@"enum") => @intFromEnum(@as(values, cmp_value)),
                         else => cmp_value,
@@ -494,6 +496,18 @@ fn GenericAccessors(self: type) type {
             };
         }
     };
+}
+
+inline fn addRegClobber(reg: armv7_general_register) void {
+    switch (reg) {
+        .r0 => asm volatile ("" ::: "r0"),
+        .r1 => asm volatile ("" ::: "r1"),
+        .r2 => asm volatile ("" ::: "r2"),
+        .r3 => asm volatile ("" ::: "r3"),
+        .r4 => asm volatile ("" ::: "r4"),
+        .r5 => asm volatile ("" ::: "r5"),
+        .sp => {},
+    }
 }
 
 inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_register {
@@ -514,6 +528,7 @@ inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_registe
             @compileError("Unsupported value type");
         },
     }
+    addRegClobber(reg);
     return reg;
 }
 
@@ -587,6 +602,8 @@ inline fn IF(comptime reg: armv7_general_register, comptime condition: enum { Eq
         else => {},
     }
     LABEL(exit);
+    addRegClobber(reg);
+    addRegClobber(tmp_reg);
 }
 
 pub inline fn EndlessLoop() void {
@@ -724,14 +741,14 @@ inline fn UpdateDataCache(comptime action: enum { Invalidate }, comptime base: a
     const sys_reg = switch (action) {
         .Invalidate => DCIMVAC,
     };
-    const mem_size = SET(.r2, size);
+    const mem_size = SET(.r0, size);
     IF(mem_size, .Equal, 0, exit, .f);
-    const mem_addr = SET(.r3, base);
+    const mem_addr = SET(.r1, base);
     DO(.Add, mem_size, mem_addr);
     const mem_end = mem_size;
-    const data_cache_line_size = CTR.DminLine.readTo(.r4);
+    const data_cache_line_size = CTR.DminLine.readTo(.r2);
     DO(.LeftShift, data_cache_line_size, cpu_word_size);
-    const mask = SET(.r5, data_cache_line_size);
+    const mask = SET(.r3, data_cache_line_size);
     DO(.Sub, mask, 1);
     DO(.ClearBits, mem_addr, mask);
     LABEL(loop);
@@ -740,22 +757,24 @@ inline fn UpdateDataCache(comptime action: enum { Invalidate }, comptime base: a
     IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
     asm volatile ("dsb");
     LABEL(exit);
+    asm volatile ("" ::: "r0", "r1", "r2", "r3");
 }
 
 inline fn ZeroMemory(comptime base: anytype, comptime size: anytype) void {
     const loop = 1;
     const exit = 2;
-    const mem_size = SET(.r2, size);
+    const mem_size = SET(.r0, size);
     IF(mem_size, .Equal, 0, exit, .f);
-    const mem_addr = SET(.r3, base);
+    const mem_addr = SET(.r1, base);
     const mem_end = mem_size;
     DO(.Add, mem_end, mem_addr);
-    const value = SET(.r4, 0);
+    const value = SET(.r2, 0);
     LABEL(loop);
     SAVE(.Byte, value, mem_addr);
     DO(.Add, mem_addr, 1);
     IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
     LABEL(exit);
+    asm volatile ("" ::: "r0", "r1", "r2");
 }
 
 pub inline fn ResetMemory() void {
@@ -794,6 +813,7 @@ pub inline fn InitializeStacks() void {
     _ = SET(.sp, SUB(stack_addr, abt_stack_size));
 
     SetMode(.Monitor);
+    asm volatile ("" ::: "r0", "r1", "r2", "r3", "r4", "r5");
 }
 
 const fiq_stack_size = 512;
