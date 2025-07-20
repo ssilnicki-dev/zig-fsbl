@@ -27,17 +27,22 @@
       "stopOnEntry": true,
       "program": "${workspaceFolder}/zig-out/bin/qsmp-fsbl",
           "initCommands": [
-            "shell pkill -f openocd || true",
+            "settings set target.max-children-depth 8",
+            "settings set -- target.max-children-count -1",
             "shell daemon -- openocd -f interface/ftdi/dp_busblaster.cfg -f target/stm32mp15x.cfg -f ${workspaceFolder}/src/stm32mp1/openocd-init-cpu0.cfg",
             "shell sh -c \"until nc -z localhost 3333 2\\>/dev/null\\; do sleep 0.1\\; done\""
           ],
           "attachCommands": [
             "file --arch armv7-none-none ${workspaceFolder}/zig-out/bin/qsmp-fsbl",
             "gdb-remote 3333",
+            "type format add --format hex uint64_t",
+            "type format add --format hex uint32_t",
+            "type format add --format hex \"unsigned long long\"",
             "target modules load --load --set-pc-to-entry --slide 0",
           ],
           "terminateCommands": [
-            "shell pkill -f openocd || true",
+            "shell sh -c \"pkill -9 -f openocd || true\"",
+            "shell sh -c \"pkill -9 -f lldb-dap || true\"",
           ]
     },
     {
