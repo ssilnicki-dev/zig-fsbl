@@ -15,6 +15,13 @@ const Mode = enum(u5) {
     Undefined = 0x1b,
 };
 
+const ID_MMFR4 = struct { // Memory Model Feature Register 4: G8-12089[1]
+    usingnamespace CP15Reg(0, 0, 2, 6, .ReadOnly);
+    pub const CnP = ID_PFR0.Field(12, 4, enum(u4) { Supported = 0b001 }); // Common not Private
+};
+
+const TLBIALL = CP15Reg(0, 8, 7, 0, .WriteOnly); // TLB Invalidate All: G8-12240
+
 const MemoryAttribute = enum(u8) {
     Device = Device_nGnRE,
     NormalMemory = NonTransientMemWbWaRa + (NonTransientMemWbWaRa << 4),
@@ -225,12 +232,15 @@ const SCTLR = struct { // System Control Register: G8-12196[1]
     pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 }); // Default Speculative Store Bypass Safe value on exception
     pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 }); // T32 Exception Enable
     pub const EE = SCTLR.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 }); // Endianess on Exception
+    pub const WXN = SCTLR.Bit(19); // Write permission implies XN (Execute-never)
     pub const NTWE = SCTLR.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFE at EL0
     pub const NTWI = SCTLR.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFI at EL0
     pub const V = SCTLR.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 }); // Vectors bit
     pub const I = SCTLR.Bit(12); // Instruction access Cacheability control, for accesses from EL1 and EL0
     pub const CP15BEN = SCTLR.Bit(5); // System instruction memory barrier enable
+    pub const C = SCTLR.Bit(2); // Cecheability control, for data accesses at EL1 and EL0
     pub const A = SCTLR.Bit(1); // Alignment ckeck enable
+    pub const M = SCTLR.Bit(0); // MMU enablefor EL1 ad EL0 stage 1 translation
     const ReservedBit23 = SCTLR.ReservedBit(23, 1); // aka SPAN
     const ReservedBit22 = SCTLR.ReservedBit(22, 1); // RES1
     const ReservedBit04 = SCTLR.ReservedBit(4, 1); // aka LSMAOE
@@ -825,3 +835,177 @@ const svc_stack_size = 8192;
 const per_cpu_stacks_size = fiq_stack_size + irq_stack_size + abt_stack_size + und_stack_size + mon_stack_size + svc_stack_size;
 
 const platform_stacks: [platform_clusters * platform_cpus_per_cluster * per_cpu_stacks_size]u8 align(8) linksection(".stack") = undefined;
+
+const TrabslationTableGranularity = enum(u5) {
+    Block2M = 21,
+    Page4K = 12,
+    fn factor(self: TrabslationTableGranularity) u32 {
+        return @as(u32, 1) << @intFromEnum(self);
+    }
+    fn alignmentMask(self: TrabslationTableGranularity) u32 {
+        return ~(self.factor() - 1);
+    }
+    pub fn tableIndex(self: TrabslationTableGranularity, table_base_va: u32, addr: u32) usize {
+        return (addr & self.alignmentMask() - table_base_va) / self.factor();
+    }
+    pub fn va(self: TrabslationTableGranularity, table_base_va: u32, table_idx: u32) u32 {
+        return table_base_va + table_idx * self.factor();
+    }
+};
+
+const DescriptorType = enum {
+    Block,
+    Page,
+    Table,
+    pub fn asLongDescriptorField(self: DescriptorType) u64 {
+        return switch (self) {
+            .Table, .Page => 0b11,
+            .Block => 0b1,
+        };
+    }
+};
+
+const SecurityAccess = enum(u1) {
+    SecureAccess = 0,
+    NonSecureAccess = 1,
+    pub fn asLongDescriptorField(self: SecurityAccess) u64 {
+        return @as(u64, @intFromEnum(self)) << 5;
+    }
+};
+
+const ReadWriteAccess = enum(u1) {
+    ReadWrite = 0,
+    ReadOnly = 1,
+    pub fn asLongDescriptorField(self: ReadWriteAccess) u64 {
+        return @as(u64, @intFromEnum(self)) << 7;
+    }
+};
+
+const Shareability = enum(u2) {
+    NonShareable = 0,
+    OuterShareable = 0b10,
+    InnerShareable = 0b11,
+    pub fn asLongDescriptorField(self: Shareability) u64 {
+        return @as(u64, @intFromEnum(self)) << 8;
+    }
+};
+
+const ExecutePermission = enum(u2) {
+    ExecutionPermitted = 0,
+    ExecutionProhibited = 0b11,
+    pub fn asLongDescriptorField(self: ExecutePermission) u64 {
+        return @as(u64, @intFromEnum(self)) << 53;
+    }
+};
+
+fn ttLongDescriptor(
+    pa: u32,
+    comptime desc_type: DescriptorType,
+    comptime mem_attr: MemoryAttribute,
+    comptime exec_perm: ExecutePermission,
+    comptime secur_level: SecurityAccess,
+    comptime rw_access: ReadWriteAccess,
+    comptime shareability: Shareability,
+) u64 {
+    comptime if (exec_perm == .ExecutionPermitted) {
+        if (rw_access == .ReadWrite)
+            @compileError(print("prohibited attributes multiplex: {s}, {s}", .{ @tagName(rw_access), @tagName(exec_perm) }));
+        if (mem_attr == .Device)
+            @compileError(print("prohibited attributes multiplex: {s}, {s}", .{ @tagName(mem_attr), @tagName(exec_perm) }));
+    };
+    var ret: u64 = pa;
+    ret |= desc_type.asLongDescriptorField();
+    ret |= rw_access.asLongDescriptorField();
+    ret |= exec_perm.asLongDescriptorField();
+    ret |= mem_attr.asLongDescriptorField();
+    ret |= secur_level.asLongDescriptorField();
+    ret |= shareability.asLongDescriptorField();
+    ret |= 1 << 10; // Access flag
+
+    return ret;
+}
+
+fn ttTableLongDescriptor(pa: u32) u64 {
+    return (@as(u64, pa) | DescriptorType.Table.asLongDescriptorField());
+}
+
+extern const sysram_start: u32;
+extern const text_start: u32;
+extern const ro_data_start: u32;
+extern const mbox_start: u32;
+extern const mbox_end: u32;
+
+pub export fn InitializeMMU() void { // G5.5 G5-11643[1]
+    // NOTE: ad-hoc implementation for particular use case using Long-descriptor table format
+    const master_tt = tt[0..512]; // Translation Table for first Gigabyte VA with 2MB granularity
+    const sysram_tt = tt[512..1024]; // Translation Table for Sysram & some periphery VAs with 4K granularity
+    const page_size = 4096;
+    MAIR.Reset();
+    @memset(&tt, 0);
+
+    const sysram_idx = TrabslationTableGranularity.Block2M.tableIndex(0, @intFromPtr(&sysram_start));
+    master_tt[sysram_idx] = ttTableLongDescriptor(@intFromPtr(sysram_tt));
+    const sysram_block_start_address = TrabslationTableGranularity.Block2M.va(0, sysram_idx);
+
+    // map sysram pages:
+    var current_pa = @intFromPtr(&text_start);
+    while (current_pa < @intFromPtr(&ro_data_start)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionPermitted, .SecureAccess, .ReadOnly, .InnerShareable);
+        current_pa +|= page_size;
+    }
+
+    current_pa = @intFromPtr(&ro_data_start);
+    while (current_pa < @intFromPtr(&rw_data_start)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadOnly, .InnerShareable);
+        current_pa +|= page_size;
+    }
+
+    current_pa = @intFromPtr(&rw_data_start);
+    while (current_pa < @intFromPtr(&mbox_start)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .InnerShareable);
+        current_pa +|= page_size;
+    }
+
+    current_pa = @intFromPtr(&mbox_start);
+    while (current_pa < @intFromPtr(&mbox_end)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalNonCacheableMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .NonShareable);
+        current_pa +|= page_size;
+    }
+
+    // map pages, occupied by translation tables
+    for ([2][]u64{ master_tt, sysram_tt }) |t| {
+        current_pa = @intFromPtr(t.ptr);
+        const tt_idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[tt_idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadOnly, .InnerShareable);
+    }
+    // TODO:
+    // 1. map periphery
+    // 2. map part of DDR to load rich OS kernel
+    // 3. map part of DDR for secure frame buffer
+
+    TTBCR.Reset();
+    TTBR0.Reset();
+    TTBCR.EAE.Select(.Enabled);
+    TTBCR.TSZ.Select(.TTBR0_1GB);
+    TTBCR.EPD0.Select(.Disabled);
+    TTBCR.EPD1.Select(.Enabled);
+    TTBCR.A1.Select(.ASIDfromTTBR0);
+    TTBCR.SH0.Select(.InnerShareable);
+    TTBCR.IRGN0.Select(.WbRaWaCacheable);
+    TTBCR.ORGN0.Select(.WbRaWaCacheable);
+    TTBCR.T2E.Select(.Disabled);
+    TTBR0.BADDR.Write(@as(TTBR0.BADDR.IntType, @intCast(@intFromPtr(master_tt) >> 1)));
+    TTBR0.ASID.Write(@as(TTBR0.ASID.IntType, 0));
+    ID_MMFR4.CnP.If(.Equal, .Supported, TTBR0.CnP.Select, .{.Enabled});
+    TLBIALL.writeFrom(armv7_general_register.r0);
+    SCTLR.WXN.Select(.Enabled);
+    SCTLR.C.Select(.Enabled);
+    asm volatile ("dsb ish");
+    SCTLR.M.Select(.Enabled);
+}
+
+var tt: [512 * 2]u64 align(4096) linksection(".tt") = undefined;

@@ -40,6 +40,7 @@ export fn Reset_Handler() callconv(.naked) void {
 
     arch.ResetMemory();
 
+    arch.call(arch.InitializeMMU);
     arch.EndlessLoop();
 }
 
