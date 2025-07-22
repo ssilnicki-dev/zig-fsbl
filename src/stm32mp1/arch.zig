@@ -15,6 +15,167 @@ const Mode = enum(u5) {
     Undefined = 0x1b,
 };
 
+const ID_MMFR4 = struct { // Memory Model Feature Register 4: G8-12089[1]
+    usingnamespace CP15Reg(0, 0, 2, 6, .ReadOnly);
+    pub const CnP = ID_PFR0.Field(12, 4, enum(u4) { Supported = 0b001 }); // Common not Private
+};
+
+const TLBIALL = CP15Reg(0, 8, 7, 0, .WriteOnly); // TLB Invalidate All: G8-12240
+
+const MemoryAttribute = enum(u8) {
+    Device = Device_nGnRE,
+    NormalMemory = NonTransientMemWbWaRa + (NonTransientMemWbWaRa << 4),
+    NormalNonCacheableMemory = CacheDisabled + (CacheDisabled << 4),
+
+    const CacheWriteAllocate = 1;
+    const CacheReadAllocate = 1 << 1;
+    const CacheDisabled = 1 << 2;
+    const CacheNonTransient = 1 << 3;
+    const TransientMemWbWaRa = CacheDisabled + CacheWriteAllocate + CacheReadAllocate;
+    const NonCachable = CacheDisabled;
+    const TransientMemWbWa = CacheDisabled + CacheWriteAllocate;
+    const TransientMemWbRa = CacheDisabled + CacheReadAllocate;
+    const NonTransientMemWbWa = CacheDisabled + CacheWriteAllocate + CacheNonTransient;
+    const NonTransientMemWbWaRa = CacheDisabled + CacheWriteAllocate + CacheReadAllocate + CacheNonTransient;
+    const NonTransientMemWbRa = CacheDisabled + CacheReadAllocate + CacheNonTransient;
+    const TransientMemWtWa = CacheWriteAllocate;
+    const TransientMemWtWaRa = CacheWriteAllocate + CacheReadAllocate;
+    const TransientMemWtRa = CacheReadAllocate;
+    const NonTransientMemWtWa = CacheWriteAllocate + CacheNonTransient;
+    const NonTransientMemWtWaRa = CacheWriteAllocate + CacheReadAllocate + CacheNonTransient;
+    const NonTransientMemWtRa = CacheReadAllocate + CacheNonTransient;
+    const Device_nGnRnE = 0;
+    const Device_nGnRE = CacheDisabled;
+    const Device_nGRE = CacheNonTransient;
+    const Device_GRE = CacheDisabled + CacheNonTransient;
+    pub fn asLongDescriptorField(comptime self: MemoryAttribute) u64 {
+        return @as(u64, MAIR.GetIndex(self)) << 2;
+    }
+};
+
+const MAIR = struct {
+    pub const AttrIndexIntType = u3;
+    const MAIR0 = struct { // Memory Attribute Indirection Register 0: G8-12129[1]
+        usingnamespace CP15Reg(0, 10, 2, 0, .ReadWrite);
+    };
+
+    const MAIR1 = struct { // Memory Attribute Indirection Register 1: G8-12133[1]
+        usingnamespace CP15Reg(0, 10, 2, 1, .ReadWrite);
+    };
+    const Attr0 = MAIR0.Field(0, 8, MemoryAttribute); // Attribute 0
+    const Attr1 = MAIR0.Field(8, 8, MemoryAttribute); // ...
+    const Attr2 = MAIR0.Field(16, 8, MemoryAttribute);
+    const Attr3 = MAIR0.Field(24, 8, MemoryAttribute);
+    const Attr4 = MAIR1.Field(0, 8, MemoryAttribute);
+    const Attr5 = MAIR1.Field(8, 8, MemoryAttribute);
+    const Attr6 = MAIR1.Field(16, 8, MemoryAttribute);
+    const Attr7 = MAIR1.Field(24, 8, MemoryAttribute);
+    pub inline fn Reset() void {
+        const reset = SET(.r0, 0);
+        MAIR0.writeFrom(reset);
+        MAIR1.writeFrom(reset);
+    }
+
+    fn isMatch(comptime field: anytype, comptime attr: MemoryAttribute) bool {
+        return switch (field.Read()) {
+            0 => brk: {
+                field.Select(attr);
+                break :brk true;
+            },
+            @intFromEnum(attr) => true,
+            else => false,
+        };
+    }
+
+    pub fn GetIndex(comptime attr: MemoryAttribute) AttrIndexIntType {
+        if (@intFromEnum(attr) == 0) {
+            Attr0.Set(0);
+            return 0;
+        }
+        if (isMatch(Attr1, attr)) return 1;
+        if (isMatch(Attr2, attr)) return 2;
+        if (isMatch(Attr3, attr)) return 3;
+        if (isMatch(Attr4, attr)) return 4;
+        if (isMatch(Attr5, attr)) return 5;
+        if (isMatch(Attr6, attr)) return 6;
+        if (isMatch(Attr7, attr)) return 7;
+        unreachable; // FIXME?
+    }
+};
+
+fn TTBR(namespace: anytype) type {
+    return struct {
+        usingnamespace namespace;
+        const self = @This();
+        // When TTBCR.EAE = 0. Unused alternative
+        const TTB = undefined; // Translation table base address.
+        const IRGN0 = undefined; // Inner region cacheability
+        const IRGN1 = undefined; // Inner region cacheability
+        const NOS = undefined; // Not Outer Shareable
+        const RGN = undefined; // Outer cacheability
+        const S = undefined; // Shareable
+        // When TTBCR.EAE = 1
+        pub const ASID = self.ExtendedField(48, 8, enum {}); // Address Space Identifier
+        pub const BADDR = self.ExtendedField(1, 47, enum {}); // Translation table base address. NOTE: meaningful bits are tuneable!
+        pub const CnP = self.ExtendedBit(0); // Common not Private
+
+        pub inline fn Reset() void {
+            _ = SET(.r0, 0);
+            _ = SET(.r1, 0);
+            self.writeFrom(.{ .r0, .r1 });
+        }
+    };
+}
+
+const TTBR0 = TTBR(CP15Reg(0, 2, 0, 0, .ReadWrite)); // Translation Table Base Register 0: G8-12307[1]
+const TTBR1 = undefined; // Translation Table Base Register 1: G8-12314[1]
+
+const TTBCR = struct { // Translation Table Base Control Register: G8-12293[1]
+    usingnamespace CP15Reg(0, 2, 0, 2, .ReadWrite);
+    pub const EAE = TTBCR.Bit(31); // Extended Address Enable
+    // When TTBCR.EAE = 0. Unused alternative
+    const PD1 = undefined; // Translation table walk disable for translating using TTBR1
+    const PD0 = undefined; // Translation table walk disable for translating using TTBR0
+    const N = undefined; // Width of base address in TTBR0 & TTBR1
+    // When TTBCR.EAE = 1
+    const SH1 = undefined; // Shareability attribute for memory associated with translation table walks using TTBR1
+    const ORGN1 = undefined; // Outer cacheability attribute for memory associated with translation table walks using TTBR1
+    const IRGN1 = undefined; // Inner cacheability attribute for memory associated with translation table walks using TTBR1
+    pub const EPD1 = TTBCR.Bit(23); // Translation table walk disable for translations using TTBR1
+    pub const A1 = TTBCR.Field(22, 1, enum(u1) { ASIDfromTTBR0 = 0, ASIDfromTTBR1 = 1 }); // Selects whether TTBR0 or TTBR1 defines the ASID
+    pub const TSZ = enum(u6) { // address ranges. See G5.5.5 (G5-11652[1])
+        TTBR0_4GB = 0,
+        TTBR0_2GB = 1,
+        TTBR0_1GB = 2,
+        TTBR0_512MB = 3,
+        TTBR0_256MB = 4,
+        TTBR0_128MB = 5,
+        TTBR0_64MB = 6,
+        TTBR0_32MB = 7,
+        // Input address ranges & sizes, translated using TTBR0 and TTBR1
+        const T1SZ = TTBCR.Field(16, 3, enum {});
+        const T0SZ = TTBCR.Field(0, 3, enum {});
+        pub inline fn Select(comptime range: @This()) void {
+            T0SZ.Set(@intFromEnum(range) & 0b111);
+            T1SZ.Set(@intFromEnum(range) >> 3);
+        }
+        pub inline fn asU32(comptime range: @This()) u32 {
+            return (@as(u32, @intFromEnum(range)) & 0b111) | ((@as(u32, @intFromEnum(range)) >> 3) << 16);
+        }
+    };
+    pub const SH0 = TTBCR.Field(12, 3, enum(u3) { NonShareable = 0, OuterShareable = 1, InnerShareable = 3 }); // Shareability attribute for memory associated with translation table walks using TTBR0
+    const CacheAbility = enum(u2) { NonCacheable = 0, WbRaWaCacheable = 1, WtRaCacheable = 2, WbRaCacheable = 3 };
+    pub const ORGN0 = TTBCR.Field(10, 2, CacheAbility); // Outer cacheability attribute for memory associated with translation table walks using TTBR0
+    pub const IRGN0 = TTBCR.Field(8, 2, CacheAbility); // Inner cacheability attribute for memory associated with translation table walks using TTBR0
+    pub const EPD0 = TTBCR.Bit(7); // Translation table walk disable for translations using TTBR0
+    pub const T2E = TTBCR.Bit(6); // TTBCR2 Enable
+
+    pub inline fn Reset() void {
+        const reset = SET(.r0, 0);
+        TTBCR.writeFrom(reset);
+    }
+};
+
 const ACTLR = struct { // Auxilary Control Register: G8-11795[1], 4-59[2]
     usingnamespace CP15Reg(0, 1, 0, 1, .ReadWrite);
     pub const SMP = ACTLR.Bit(6); // Coherent requests to the processor
@@ -71,12 +232,15 @@ const SCTLR = struct { // System Control Register: G8-12196[1]
     pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 }); // Default Speculative Store Bypass Safe value on exception
     pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 }); // T32 Exception Enable
     pub const EE = SCTLR.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 }); // Endianess on Exception
+    pub const WXN = SCTLR.Bit(19); // Write permission implies XN (Execute-never)
     pub const NTWE = SCTLR.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFE at EL0
     pub const NTWI = SCTLR.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFI at EL0
     pub const V = SCTLR.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 }); // Vectors bit
     pub const I = SCTLR.Bit(12); // Instruction access Cacheability control, for accesses from EL1 and EL0
     pub const CP15BEN = SCTLR.Bit(5); // System instruction memory barrier enable
+    pub const C = SCTLR.Bit(2); // Cecheability control, for data accesses at EL1 and EL0
     pub const A = SCTLR.Bit(1); // Alignment ckeck enable
+    pub const M = SCTLR.Bit(0); // MMU enablefor EL1 ad EL0 stage 1 translation
     const ReservedBit23 = SCTLR.ReservedBit(23, 1); // aka SPAN
     const ReservedBit22 = SCTLR.ReservedBit(22, 1); // RES1
     const ReservedBit04 = SCTLR.ReservedBit(4, 1); // aka LSMAOE
@@ -116,32 +280,56 @@ const BSEC_DENABLE = struct {
     usingnamespace PlatformReg(0x5C005014);
 };
 
-// TODO: add support for 64 bit width registers
 fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite, WriteOnly }) type {
     return struct {
         pub usingnamespace GenericAccessors(@This());
-        inline fn readTo(comptime access_reg: armv7_general_register) void {
+        inline fn readTo(comptime access_reg: anytype) void {
             switch (rw) {
                 .WriteOnly => {
                     @compileError("Register is ReadOnly");
                 },
                 else => {
-                    access(access_reg, .mrc);
+                    const instruction = switch (@TypeOf(access_reg)) {
+                        armv7_general_register => .mrc,
+                        else => .mrrc,
+                    };
+                    access(access_reg, instruction);
                 },
             }
         }
-        inline fn writeFrom(access_reg: armv7_general_register) void {
+        inline fn writeFrom(access_reg: anytype) void {
             switch (rw) {
                 .ReadOnly => @compileError("Register is ReadOnly"),
                 else => {
-                    access(access_reg, .mcr);
+                    const instruction = switch (@TypeOf(access_reg)) {
+                        armv7_general_register => .mcr,
+                        else => .mcrr,
+                    };
+                    access(access_reg, instruction);
                     asm volatile ("isb");
                 },
             }
         }
 
-        inline fn access(comptime access_reg: armv7_general_register, comptime instruction: @TypeOf(.@"enum")) void {
-            asm volatile (print("{s} p15, {d}, r{d}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @intFromEnum(access_reg), crn, crm, op2 }));
+        inline fn access(comptime access_reg: anytype, comptime instruction: @TypeOf(.@"enum")) void {
+            switch (@TypeOf(access_reg)) {
+                armv7_general_register => {
+                    asm volatile (print("{s} p15, {d}, {s}, c{d}, c{d}, {d}", .{ @tagName(instruction), op1, @tagName(access_reg), crn, crm, op2 }));
+                    addRegClobber(access_reg);
+                },
+                else => {
+                    comptime if ((@intFromEnum(@as(armv7_general_register, access_reg[0])) == @intFromEnum(@as(armv7_general_register, access_reg[1]))) or
+                        (@import("std").mem.eql(u8, @tagName(access_reg[0]), "r15")) or
+                        (@import("std").mem.eql(u8, @tagName(access_reg[1]), "r15")))
+                    {
+                        @compileLog(print("Unsupported registers as arguments: {s}, {s}", .{ @tagName(access_reg[0]), @tagName(access_reg[1]) }));
+                    };
+                    // BUG: parameters untested for the whole range of 64 bit registers for aarch32
+                    asm volatile (print("{s} p15, {d}, {s}, {s}, c{d}", .{ @tagName(instruction), op2, @tagName(access_reg[0]), @tagName(access_reg[1]), crn }));
+                    addRegClobber(access_reg[0]);
+                    addRegClobber(access_reg[1]);
+                },
+            }
         }
     };
 }
@@ -173,8 +361,6 @@ fn PlatformReg(addr: comptime_int) type {
 
 fn GenericAccessors(self: type) type {
     return struct {
-        const data = armv7_general_register.r0;
-
         fn ReservedBit(comptime shift: u5, comptime value: u1) type {
             return ReservedField(shift, 1, value);
         }
@@ -190,30 +376,117 @@ fn GenericAccessors(self: type) type {
             };
         }
 
+        pub fn ExtendedBit(comptime bit: u6) type {
+            return ExtendedField(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
+        }
+
+        fn ExtendedField(comptime shift: u8, comptime width: u8, comptime values: @TypeOf(enum {})) type {
+            const max = (1 << width) - 1;
+            const mask: u64 = max << shift;
+            const register_max_bits = 64;
+            comptime if (shift + width > register_max_bits) {
+                @compileError("field declaration error");
+            };
+            return struct {
+                pub const IntType = @Type(@import("std").builtin.Type{ .int = .{ .bits = width, .signedness = .unsigned } });
+                pub inline fn Select(comptime v: values) void {
+                    Write(v);
+                }
+                pub fn Write(value: anytype) void {
+                    var u64_value: u64 = switch (@TypeOf(value)) {
+                        comptime_int => brk: {
+                            if (value > max) {
+                                @compileError(print("value {d} does not fit field space", .{value}));
+                            }
+                            break :brk value;
+                        },
+                        IntType => brk: {
+                            break :brk value;
+                        },
+                        @TypeOf(.enum_enternal) => @intFromEnum(@as(values, value)),
+                        values => @intFromEnum(value),
+                        else => @compileError(print("value type unsupported: {s}. Expected: comptime_int, {s} or {s}", .{ @typeName(@TypeOf(value)), @typeName(values), @typeName(IntType) })),
+                    };
+                    u64_value <<= shift;
+                    var reg = readRegister();
+                    reg &= ~mask;
+                    reg |= u64_value;
+                    asm volatile (
+                        \\ push {r0, r1}
+                        \\ mov r0, %[low]
+                        \\ mov r1, %[high]
+                        :
+                        : [low] "r" (@as(u32, @truncate(reg))),
+                          [high] "r" (@as(u32, @intCast(reg >> 32))),
+                        : "r0", "r1", "cc"
+                    );
+                    self.writeFrom(.{ .r0, .r1 });
+                    asm volatile ("pop {r0, r1}");
+                }
+                pub fn Read() IntType {
+                    return @truncate((readRegister() & mask) >> shift);
+                }
+                pub inline fn asU64(comptime value: values) u64 {
+                    return @as(u64, @intFromEnum(value)) << shift;
+                }
+                fn readRegister() u64 {
+                    var lo: u32 = undefined;
+                    var hi: u32 = undefined;
+                    asm volatile ("push {r0, r1}");
+                    self.readTo(.{ .r0, .r1 });
+                    asm volatile (
+                        \\ mov %[low], r0
+                        \\ mov %[high], r1
+                        : [low] "=r" (lo),
+                          [high] "=r" (hi),
+                        :
+                        : "r0", "r1", "cc"
+                    );
+                    asm volatile ("pop {r0, r1}");
+                    return (@as(u64, @intCast(hi)) << 32) + lo;
+                }
+            };
+        }
+
         pub fn Bit(comptime bit: u5) type {
             return Field(bit, 1, enum(u1) { Disabled = 0, Enabled = 1 });
         }
 
+        const r0 = armv7_general_register.r0;
         fn Field(comptime shift: u5, comptime width: u5, comptime values: @TypeOf(enum {})) type {
             _ = comptime (shift + (width - 1)); // check Field declaration sanity
             return struct {
+                pub const IntType = @Type(@import("std").builtin.Type{ .int = .{ .bits = width, .signedness = .unsigned } });
+                const max = (1 << width) - 1;
+                const mask: u32 = max << shift;
+                pub fn Read() IntType {
+                    var value: u32 = undefined;
+                    self.readTo(r0);
+                    asm volatile (
+                        \\ mov %[value], r0
+                        : [value] "=r" (value),
+                        :
+                        : "r0", "cc"
+                    );
+                    return @truncate((value & mask) >> shift);
+                }
                 pub inline fn Select(comptime v: values) void {
                     Set(@intFromEnum(v));
                 }
-                pub inline fn Set(comptime v: u31) void {
+                pub inline fn Set(comptime v: u32) void {
                     if (v == 0) {
                         Clear();
                     } else {
-                        self.readTo(data);
-                        asm volatile (print("bfc {s}, #{d}, #{d}", .{ @tagName(data), shift, width }));
-                        asm volatile (print("orr {s}, {s}, #{d}", .{ @tagName(data), @tagName(data), v << shift }));
-                        self.writeFrom(data);
+                        self.readTo(r0);
+                        asm volatile (print("bfc {s}, #{d}, #{d}", .{ @tagName(r0), shift, width }));
+                        asm volatile (print("orr {s}, {s}, #{d}", .{ @tagName(r0), @tagName(r0), v << shift }));
+                        self.writeFrom(r0);
                     }
                 }
                 pub inline fn Clear() void {
-                    self.readTo(data);
-                    asm volatile (print("bfc {s}, #{d}, #{d} ", .{ @tagName(data), shift, width }));
-                    self.writeFrom(data);
+                    self.readTo(r0);
+                    asm volatile (print("bfc {s}, #{d}, #{d} ", .{ @tagName(r0), shift, width }));
+                    self.writeFrom(r0);
                 }
                 pub inline fn readTo(comptime reg: armv7_general_register) armv7_general_register {
                     self.readTo(reg);
@@ -224,7 +497,7 @@ fn GenericAccessors(self: type) type {
                     return @as(u32, @intFromEnum(value)) << shift;
                 }
                 pub inline fn If(comptime condition: anytype, comptime cmp_value: anytype, action: anytype, comptime action_argument: anytype) void {
-                    const reg = readTo(.r0);
+                    const reg = readTo(r0);
                     IF(reg, condition, switch (@TypeOf(cmp_value)) {
                         @TypeOf(.@"enum") => @intFromEnum(@as(values, cmp_value)),
                         else => cmp_value,
@@ -233,6 +506,18 @@ fn GenericAccessors(self: type) type {
             };
         }
     };
+}
+
+inline fn addRegClobber(reg: armv7_general_register) void {
+    switch (reg) {
+        .r0 => asm volatile ("" ::: "r0"),
+        .r1 => asm volatile ("" ::: "r1"),
+        .r2 => asm volatile ("" ::: "r2"),
+        .r3 => asm volatile ("" ::: "r3"),
+        .r4 => asm volatile ("" ::: "r4"),
+        .r5 => asm volatile ("" ::: "r5"),
+        .sp => {},
+    }
 }
 
 inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_register {
@@ -253,6 +538,7 @@ inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_registe
             @compileError("Unsupported value type");
         },
     }
+    addRegClobber(reg);
     return reg;
 }
 
@@ -326,6 +612,8 @@ inline fn IF(comptime reg: armv7_general_register, comptime condition: enum { Eq
         else => {},
     }
     LABEL(exit);
+    addRegClobber(reg);
+    addRegClobber(tmp_reg);
 }
 
 pub inline fn EndlessLoop() void {
@@ -463,14 +751,14 @@ inline fn UpdateDataCache(comptime action: enum { Invalidate }, comptime base: a
     const sys_reg = switch (action) {
         .Invalidate => DCIMVAC,
     };
-    const mem_size = SET(.r2, size);
+    const mem_size = SET(.r0, size);
     IF(mem_size, .Equal, 0, exit, .f);
-    const mem_addr = SET(.r3, base);
+    const mem_addr = SET(.r1, base);
     DO(.Add, mem_size, mem_addr);
     const mem_end = mem_size;
-    const data_cache_line_size = CTR.DminLine.readTo(.r4);
+    const data_cache_line_size = CTR.DminLine.readTo(.r2);
     DO(.LeftShift, data_cache_line_size, cpu_word_size);
-    const mask = SET(.r5, data_cache_line_size);
+    const mask = SET(.r3, data_cache_line_size);
     DO(.Sub, mask, 1);
     DO(.ClearBits, mem_addr, mask);
     LABEL(loop);
@@ -479,22 +767,24 @@ inline fn UpdateDataCache(comptime action: enum { Invalidate }, comptime base: a
     IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
     asm volatile ("dsb");
     LABEL(exit);
+    asm volatile ("" ::: "r0", "r1", "r2", "r3");
 }
 
 inline fn ZeroMemory(comptime base: anytype, comptime size: anytype) void {
     const loop = 1;
     const exit = 2;
-    const mem_size = SET(.r2, size);
+    const mem_size = SET(.r0, size);
     IF(mem_size, .Equal, 0, exit, .f);
-    const mem_addr = SET(.r3, base);
+    const mem_addr = SET(.r1, base);
     const mem_end = mem_size;
     DO(.Add, mem_end, mem_addr);
-    const value = SET(.r4, 0);
+    const value = SET(.r2, 0);
     LABEL(loop);
     SAVE(.Byte, value, mem_addr);
     DO(.Add, mem_addr, 1);
     IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
     LABEL(exit);
+    asm volatile ("" ::: "r0", "r1", "r2");
 }
 
 pub inline fn ResetMemory() void {
@@ -533,6 +823,7 @@ pub inline fn InitializeStacks() void {
     _ = SET(.sp, SUB(stack_addr, abt_stack_size));
 
     SetMode(.Monitor);
+    asm volatile ("" ::: "r0", "r1", "r2", "r3", "r4", "r5");
 }
 
 const fiq_stack_size = 512;
@@ -544,3 +835,177 @@ const svc_stack_size = 8192;
 const per_cpu_stacks_size = fiq_stack_size + irq_stack_size + abt_stack_size + und_stack_size + mon_stack_size + svc_stack_size;
 
 const platform_stacks: [platform_clusters * platform_cpus_per_cluster * per_cpu_stacks_size]u8 align(8) linksection(".stack") = undefined;
+
+const TrabslationTableGranularity = enum(u5) {
+    Block2M = 21,
+    Page4K = 12,
+    fn factor(self: TrabslationTableGranularity) u32 {
+        return @as(u32, 1) << @intFromEnum(self);
+    }
+    fn alignmentMask(self: TrabslationTableGranularity) u32 {
+        return ~(self.factor() - 1);
+    }
+    pub fn tableIndex(self: TrabslationTableGranularity, table_base_va: u32, addr: u32) usize {
+        return (addr & self.alignmentMask() - table_base_va) / self.factor();
+    }
+    pub fn va(self: TrabslationTableGranularity, table_base_va: u32, table_idx: u32) u32 {
+        return table_base_va + table_idx * self.factor();
+    }
+};
+
+const DescriptorType = enum {
+    Block,
+    Page,
+    Table,
+    pub fn asLongDescriptorField(self: DescriptorType) u64 {
+        return switch (self) {
+            .Table, .Page => 0b11,
+            .Block => 0b1,
+        };
+    }
+};
+
+const SecurityAccess = enum(u1) {
+    SecureAccess = 0,
+    NonSecureAccess = 1,
+    pub fn asLongDescriptorField(self: SecurityAccess) u64 {
+        return @as(u64, @intFromEnum(self)) << 5;
+    }
+};
+
+const ReadWriteAccess = enum(u1) {
+    ReadWrite = 0,
+    ReadOnly = 1,
+    pub fn asLongDescriptorField(self: ReadWriteAccess) u64 {
+        return @as(u64, @intFromEnum(self)) << 7;
+    }
+};
+
+const Shareability = enum(u2) {
+    NonShareable = 0,
+    OuterShareable = 0b10,
+    InnerShareable = 0b11,
+    pub fn asLongDescriptorField(self: Shareability) u64 {
+        return @as(u64, @intFromEnum(self)) << 8;
+    }
+};
+
+const ExecutePermission = enum(u2) {
+    ExecutionPermitted = 0,
+    ExecutionProhibited = 0b11,
+    pub fn asLongDescriptorField(self: ExecutePermission) u64 {
+        return @as(u64, @intFromEnum(self)) << 53;
+    }
+};
+
+fn ttLongDescriptor(
+    pa: u32,
+    comptime desc_type: DescriptorType,
+    comptime mem_attr: MemoryAttribute,
+    comptime exec_perm: ExecutePermission,
+    comptime secur_level: SecurityAccess,
+    comptime rw_access: ReadWriteAccess,
+    comptime shareability: Shareability,
+) u64 {
+    comptime if (exec_perm == .ExecutionPermitted) {
+        if (rw_access == .ReadWrite)
+            @compileError(print("prohibited attributes multiplex: {s}, {s}", .{ @tagName(rw_access), @tagName(exec_perm) }));
+        if (mem_attr == .Device)
+            @compileError(print("prohibited attributes multiplex: {s}, {s}", .{ @tagName(mem_attr), @tagName(exec_perm) }));
+    };
+    var ret: u64 = pa;
+    ret |= desc_type.asLongDescriptorField();
+    ret |= rw_access.asLongDescriptorField();
+    ret |= exec_perm.asLongDescriptorField();
+    ret |= mem_attr.asLongDescriptorField();
+    ret |= secur_level.asLongDescriptorField();
+    ret |= shareability.asLongDescriptorField();
+    ret |= 1 << 10; // Access flag
+
+    return ret;
+}
+
+fn ttTableLongDescriptor(pa: u32) u64 {
+    return (@as(u64, pa) | DescriptorType.Table.asLongDescriptorField());
+}
+
+extern const sysram_start: u32;
+extern const text_start: u32;
+extern const ro_data_start: u32;
+extern const mbox_start: u32;
+extern const mbox_end: u32;
+
+pub export fn InitializeMMU() void { // G5.5 G5-11643[1]
+    // NOTE: ad-hoc implementation for particular use case using Long-descriptor table format
+    const master_tt = tt[0..512]; // Translation Table for first Gigabyte VA with 2MB granularity
+    const sysram_tt = tt[512..1024]; // Translation Table for Sysram & some periphery VAs with 4K granularity
+    const page_size = 4096;
+    MAIR.Reset();
+    @memset(&tt, 0);
+
+    const sysram_idx = TrabslationTableGranularity.Block2M.tableIndex(0, @intFromPtr(&sysram_start));
+    master_tt[sysram_idx] = ttTableLongDescriptor(@intFromPtr(sysram_tt));
+    const sysram_block_start_address = TrabslationTableGranularity.Block2M.va(0, sysram_idx);
+
+    // map sysram pages:
+    var current_pa = @intFromPtr(&text_start);
+    while (current_pa < @intFromPtr(&ro_data_start)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionPermitted, .SecureAccess, .ReadOnly, .InnerShareable);
+        current_pa +|= page_size;
+    }
+
+    current_pa = @intFromPtr(&ro_data_start);
+    while (current_pa < @intFromPtr(&rw_data_start)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadOnly, .InnerShareable);
+        current_pa +|= page_size;
+    }
+
+    current_pa = @intFromPtr(&rw_data_start);
+    while (current_pa < @intFromPtr(&mbox_start)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .InnerShareable);
+        current_pa +|= page_size;
+    }
+
+    current_pa = @intFromPtr(&mbox_start);
+    while (current_pa < @intFromPtr(&mbox_end)) {
+        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalNonCacheableMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .NonShareable);
+        current_pa +|= page_size;
+    }
+
+    // map pages, occupied by translation tables
+    for ([2][]u64{ master_tt, sysram_tt }) |t| {
+        current_pa = @intFromPtr(t.ptr);
+        const tt_idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[tt_idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadOnly, .InnerShareable);
+    }
+    // TODO:
+    // 1. map periphery
+    // 2. map part of DDR to load rich OS kernel
+    // 3. map part of DDR for secure frame buffer
+
+    TTBCR.Reset();
+    TTBR0.Reset();
+    TTBCR.EAE.Select(.Enabled);
+    TTBCR.TSZ.Select(.TTBR0_1GB);
+    TTBCR.EPD0.Select(.Disabled);
+    TTBCR.EPD1.Select(.Enabled);
+    TTBCR.A1.Select(.ASIDfromTTBR0);
+    TTBCR.SH0.Select(.InnerShareable);
+    TTBCR.IRGN0.Select(.WbRaWaCacheable);
+    TTBCR.ORGN0.Select(.WbRaWaCacheable);
+    TTBCR.T2E.Select(.Disabled);
+    TTBR0.BADDR.Write(@as(TTBR0.BADDR.IntType, @intCast(@intFromPtr(master_tt) >> 1)));
+    TTBR0.ASID.Write(@as(TTBR0.ASID.IntType, 0));
+    ID_MMFR4.CnP.If(.Equal, .Supported, TTBR0.CnP.Select, .{.Enabled});
+    TLBIALL.writeFrom(armv7_general_register.r0);
+    SCTLR.WXN.Select(.Enabled);
+    SCTLR.C.Select(.Enabled);
+    asm volatile ("dsb ish");
+    SCTLR.M.Select(.Enabled);
+}
+
+var tt: [512 * 2]u64 align(4096) linksection(".tt") = undefined;
