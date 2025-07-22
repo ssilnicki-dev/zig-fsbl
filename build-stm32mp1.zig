@@ -33,9 +33,30 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
         .target = resolver_target,
         .optimize = optimize,
         .strip = false,
+        .unwind_tables = .none,
     });
-    fsbl_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/load.S" } });
+    fsbl_elf.entry = .{.symbol_name = "EntryPoint"};
     fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker.ld" } });
+    fsbl_elf.link_gc_sections = true;
+    fsbl_elf.link_function_sections = true;
+    fsbl_elf.link_data_sections = true;
+    // fsbl_elf.want_lto = true;
+
+    const fsbl_elf_qemu = b.addExecutable(.{
+        .name = "qsmp-fsbl-qemu",
+        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
+        .target = resolver_target,
+        .optimize = optimize,
+        .strip = false,
+        .unwind_tables = .none,
+    });
+    fsbl_elf_qemu.entry = .{.symbol_name = "Reset_Handler"};
+    fsbl_elf_qemu.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker-qemu.ld" } });
+    fsbl_elf_qemu.link_gc_sections = true;
+    fsbl_elf_qemu.link_function_sections = true;
+    fsbl_elf_qemu.link_data_sections = true;
+    // fsbl_elf.want_lto = true;
+
 
     const sysram_part_elf = b.addExecutable(.{
         .name = "sysram-part",
@@ -83,7 +104,9 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     const bin = b.addObjCopy(fsbl_elf.getEmittedBin(), .{ .format = .bin });
     const copy_bin = b.addInstallBinFile(bin.getOutput(), "qsmp-fsbl.bin");
     const elf2_run_step = b.addRunArtifact(stm32header_elf);
+    const copy_elf_qemu = b.addInstallArtifact(fsbl_elf_qemu, .{});
 
+    copy_elf.step.dependOn(&copy_elf_qemu.step);
     bin.step.dependOn(&copy_elf.step);
     bin.step.dependOn(&sysram_elf2_run_step.step);
     bin.step.dependOn(&copy_ddr_part_elf.step);
