@@ -828,19 +828,22 @@ const per_cpu_stacks_size = fiq_stack_size + irq_stack_size + abt_stack_size + u
 
 const platform_stacks: [platform_clusters * platform_cpus_per_cluster * per_cpu_stacks_size]u8 align(8) linksection(".stack") = undefined;
 
-const TrabslationTableGranularity = enum(u5) {
+const TranslationTableGranularity = enum(u5) {
     Block2M = 21,
     Page4K = 12,
-    fn factor(self: TrabslationTableGranularity) u32 {
+    fn factor(self: TranslationTableGranularity) u32 {
         return @as(u32, 1) << @intFromEnum(self);
     }
-    fn alignmentMask(self: TrabslationTableGranularity) u32 {
+    fn alignmentMask(self: TranslationTableGranularity) u32 {
         return ~(self.factor() - 1);
     }
-    pub fn tableIndex(self: TrabslationTableGranularity, table_base_va: u32, addr: u32) usize {
+    pub fn isAligned(self: TranslationTableGranularity, pa: u32) bool {
+        return (pa & (self.factor() - 1)) == 0;
+    }
+    pub fn tableIndex(self: TranslationTableGranularity, table_base_va: u32, addr: u32) usize {
         return (addr & self.alignmentMask() - table_base_va) / self.factor();
     }
-    pub fn va(self: TrabslationTableGranularity, table_base_va: u32, table_idx: u32) u32 {
+    pub fn va(self: TranslationTableGranularity, table_base_va: u32, table_idx: u32) u32 {
         return table_base_va + table_idx * self.factor();
     }
 };
@@ -926,44 +929,48 @@ extern const text_start: u32;
 extern const ro_data_start: u32;
 extern const mbox_start: u32;
 extern const mbox_end: u32;
+const page_size = 0x1000;
+const master_tt = tt[0..512]; // Translation Table for first Gigabyte VA with 2MB granularity
+const sysram_tt = tt[512..1024]; // Translation Table for Sysram & some periphery VAs with 4K granularity
+
+fn invalidateTTCache() void {
+    TLBIALL.writeFrom(armv7_general_register.r0);
+}
 
 pub export fn InitializeMMU() void { // G5.5 G5-11643[1]
     // NOTE: ad-hoc implementation for particular use case using Long-descriptor table format
-    const master_tt = tt[0..512]; // Translation Table for first Gigabyte VA with 2MB granularity
-    const sysram_tt = tt[512..1024]; // Translation Table for Sysram & some periphery VAs with 4K granularity
-    const page_size = 4096;
     MAIR.Reset();
     @memset(&tt, 0);
 
-    const sysram_idx = TrabslationTableGranularity.Block2M.tableIndex(0, @intFromPtr(&sysram_start));
+    const sysram_idx = TranslationTableGranularity.Block2M.tableIndex(0, @intFromPtr(&sysram_start));
     master_tt[sysram_idx] = ttTableLongDescriptor(@intFromPtr(sysram_tt));
-    const sysram_block_start_address = TrabslationTableGranularity.Block2M.va(0, sysram_idx);
+    const sysram_block_start_address = TranslationTableGranularity.Block2M.va(0, sysram_idx);
 
     // map sysram pages:
     var current_pa = @intFromPtr(&text_start);
     while (current_pa < @intFromPtr(&ro_data_start)) {
-        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        const idx = TranslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
         sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionPermitted, .SecureAccess, .ReadOnly, .InnerShareable);
         current_pa +|= page_size;
     }
 
     current_pa = @intFromPtr(&ro_data_start);
     while (current_pa < @intFromPtr(&rw_data_start)) {
-        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        const idx = TranslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
         sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadOnly, .InnerShareable);
         current_pa +|= page_size;
     }
 
     current_pa = @intFromPtr(&rw_data_start);
     while (current_pa < @intFromPtr(&mbox_start)) {
-        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        const idx = TranslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
         sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .InnerShareable);
         current_pa +|= page_size;
     }
 
     current_pa = @intFromPtr(&mbox_start);
     while (current_pa < @intFromPtr(&mbox_end)) {
-        const idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        const idx = TranslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
         sysram_tt[idx] = ttLongDescriptor(current_pa, .Page, .NormalNonCacheableMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .NonShareable);
         current_pa +|= page_size;
     }
@@ -971,13 +978,9 @@ pub export fn InitializeMMU() void { // G5.5 G5-11643[1]
     // map pages, occupied by translation tables
     for ([2][]u64{ master_tt, sysram_tt }) |t| {
         current_pa = @intFromPtr(t.ptr);
-        const tt_idx = TrabslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
-        sysram_tt[tt_idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadOnly, .InnerShareable);
+        const tt_idx = TranslationTableGranularity.Page4K.tableIndex(sysram_block_start_address, current_pa);
+        sysram_tt[tt_idx] = ttLongDescriptor(current_pa, .Page, .NormalMemory, .ExecutionProhibited, .SecureAccess, .ReadWrite, .InnerShareable);
     }
-    // TODO:
-    // 1. map periphery
-    // 2. map part of DDR to load rich OS kernel
-    // 3. map part of DDR for secure frame buffer
 
     TTBCR.Reset();
     TTBR0.Reset();
@@ -993,7 +996,7 @@ pub export fn InitializeMMU() void { // G5.5 G5-11643[1]
     TTBR0.BADDR.Write(@as(TTBR0.BADDR.IntType, @intCast(@intFromPtr(master_tt) >> 1)));
     TTBR0.ASID.Write(@as(TTBR0.ASID.IntType, 0));
     ID_MMFR4.CnP.If(.Equal, .Supported, TTBR0.CnP.Select, .{.Enabled});
-    TLBIALL.writeFrom(armv7_general_register.r0);
+    invalidateTTCache();
     SCTLR.WXN.Select(.Enabled);
     SCTLR.C.Select(.Enabled);
     asm volatile ("dsb ish");
@@ -1001,3 +1004,40 @@ pub export fn InitializeMMU() void { // G5.5 G5-11643[1]
 }
 
 var tt: [512 * 2]u64 align(4096) linksection(".tt") = undefined;
+
+fn avaliablePages() struct { start_idx: usize, pages: usize } {
+    var start_idx: usize = 0;
+    for (sysram_tt[start_idx..]) |d| {
+        if (d == 0) break;
+        start_idx +|= 1;
+    }
+    var end_idx: usize = start_idx;
+    for (sysram_tt[end_idx..]) |d| {
+        if (d != 0) break;
+        end_idx +|= 1;
+    }
+    return .{ .start_idx = start_idx, .pages = end_idx - start_idx };
+}
+
+pub fn mapPeriphery(pa: u32, size: usize) error{ NotAvailable, NotAligned }!u32 {
+    if (!TranslationTableGranularity.Page4K.isAligned(pa)) return error.NotAligned;
+    invalidateTTCache();
+    defer invalidateTTCache();
+    const required_pages = @max(1, size / page_size);
+    const available = avaliablePages();
+    if (required_pages > available.pages)
+        return error.NotAvailable;
+
+    const sysram_idx = TranslationTableGranularity.Block2M.tableIndex(0, @intFromPtr(&sysram_start));
+    const sysram_block_start_address = TranslationTableGranularity.Block2M.va(0, sysram_idx);
+
+    var current_pa = pa;
+    const end_pa = current_pa + size;
+    var current_idx = available.start_idx;
+    while (current_pa < end_pa) {
+        sysram_tt[current_idx] = ttLongDescriptor(current_pa, .Page, .Device, .ExecutionProhibited, .SecureAccess, .ReadWrite, .NonShareable);
+        current_pa +|= page_size;
+        current_idx +|= 1;
+    }
+    return TranslationTableGranularity.Page4K.va(sysram_block_start_address, available.start_idx);
+}
