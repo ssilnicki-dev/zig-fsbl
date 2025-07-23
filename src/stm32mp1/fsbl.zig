@@ -2,6 +2,7 @@ const qsmp = @import("qsmp.zig");
 const arch = @import("arch.zig");
 
 const goto = arch.goto;
+const call = arch.call;
 
 export fn EntryPoint() callconv(.naked) void {
     goto(Reset_Handler);
@@ -38,9 +39,9 @@ export fn Reset_Handler() callconv(.naked) void {
 
     arch.PassOnlyPrimaryCpu();
 
-    arch.ResetMemory();
+    call(arch.ResetMemory);
 
-    arch.call(arch.InitializeMMU);
+    call(arch.InitializeMMU);
     arch.EndlessLoop();
 }
 

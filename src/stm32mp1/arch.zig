@@ -310,6 +310,10 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
                 },
             }
         }
+        pub fn write(value: u32) void {
+            comptime if (rw == .ReadOnly) @compileError("Register is ReadOnly");
+            writeFrom(LOAD(.Word, .r1, SET(.r0, &value)));
+        }
 
         inline fn access(comptime access_reg: anytype, comptime instruction: @TypeOf(.@"enum")) void {
             switch (@TypeOf(access_reg)) {
@@ -522,10 +526,12 @@ inline fn addRegClobber(reg: armv7_general_register) void {
 
 inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_register {
     switch (@typeInfo(@TypeOf(value))) {
-        .pointer => asm volatile (print("ldr {s}, %[addr]", .{@tagName(reg)})
-            :
-            : [addr] "i" (&value),
-        ),
+        .pointer => {
+            asm volatile (print("mov {s}, %[addr]", .{@tagName(reg)})
+                :
+                : [addr] "r" (value),
+            );
+        },
         .int, .comptime_int => {
             asm volatile (print("movw {s}, #:lower16:{d}", .{ @tagName(reg), value }));
             asm volatile (print("movt {s}, #:upper16:{d}", .{ @tagName(reg), value }));
@@ -542,12 +548,22 @@ inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_registe
     return reg;
 }
 
+inline fn LOAD(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7_general_register, address: armv7_general_register) armv7_general_register {
+    asm volatile (print("{s} {s}, [{s}]", .{ switch (size) {
+            .Byte => "ldrb",
+            .HalfWord => "ldrh",
+            .Word => "ldr",
+        }, @tagName(reg), @tagName(address) }) ::: "memory");
+    addRegClobber(reg);
+    return reg;
+}
+
 inline fn SAVE(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7_general_register, address: armv7_general_register) void {
     asm volatile (print("{s} {s}, [{s}]", .{ switch (size) {
             .Byte => "strb",
             .HalfWord => "strh",
             .Word => "str",
-        }, @tagName(reg), @tagName(address) }));
+        }, @tagName(reg), @tagName(address) }) ::: "memory");
 }
 
 inline fn DO(comptime op: enum { Add, Sub, LeftShift, ClearBits, Mul }, reg: armv7_general_register, arg: anytype) void {
@@ -745,51 +761,27 @@ extern const rw_data_size: u32;
 extern const bss_data_start: u32;
 extern const bss_data_size: u32;
 
-inline fn UpdateDataCache(comptime action: enum { Invalidate }, comptime base: anytype, comptime size: anytype) void {
-    const loop = 1;
-    const exit = 2;
+fn UpdateDataCache(comptime action: enum { Invalidate }, base: u32, size: u32) void {
     const sys_reg = switch (action) {
         .Invalidate => DCIMVAC,
     };
-    const mem_size = SET(.r0, size);
-    IF(mem_size, .Equal, 0, exit, .f);
-    const mem_addr = SET(.r1, base);
-    DO(.Add, mem_size, mem_addr);
-    const mem_end = mem_size;
-    const data_cache_line_size = CTR.DminLine.readTo(.r2);
-    DO(.LeftShift, data_cache_line_size, cpu_word_size);
-    const mask = SET(.r3, data_cache_line_size);
-    DO(.Sub, mask, 1);
-    DO(.ClearBits, mem_addr, mask);
-    LABEL(loop);
-    sys_reg.writeFrom(mem_addr);
-    DO(.Add, mem_addr, data_cache_line_size);
-    IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
-    asm volatile ("dsb");
-    LABEL(exit);
-    asm volatile ("" ::: "r0", "r1", "r2", "r3");
+    if (size > 0) {
+        const data_cache_line_size = @as(u32, CTR.DminLine.Read()) << cpu_word_size;
+        var data_addr: u32 = base & ~(data_cache_line_size - 1);
+        const data_end_addr: u32 = base + size;
+        while (data_addr < data_end_addr) {
+            sys_reg.write(data_addr);
+            data_addr += data_cache_line_size;
+        }
+    }
 }
 
-inline fn ZeroMemory(comptime base: anytype, comptime size: anytype) void {
-    const loop = 1;
-    const exit = 2;
-    const mem_size = SET(.r0, size);
-    IF(mem_size, .Equal, 0, exit, .f);
-    const mem_addr = SET(.r1, base);
-    const mem_end = mem_size;
-    DO(.Add, mem_end, mem_addr);
-    const value = SET(.r2, 0);
-    LABEL(loop);
-    SAVE(.Byte, value, mem_addr);
-    DO(.Add, mem_addr, 1);
-    IF(mem_addr, .LowerUnsigned, mem_end, loop, .b);
-    LABEL(exit);
-    asm volatile ("" ::: "r0", "r1", "r2");
-}
-
-pub inline fn ResetMemory() void {
-    UpdateDataCache(.Invalidate, &rw_data_start, &rw_data_size);
-    ZeroMemory(&bss_data_start, &bss_data_size);
+pub export fn ResetMemory() void {
+    UpdateDataCache(.Invalidate, @intFromPtr(&rw_data_start), @intFromPtr(&rw_data_size));
+    var bss: []volatile u8 = undefined;
+    bss.len = @intFromPtr(&bss_data_size);
+    bss.ptr = @ptrFromInt(@intFromPtr(&bss_data_start));
+    @memset(bss, 0);
 }
 
 pub inline fn DebugMode() void {
