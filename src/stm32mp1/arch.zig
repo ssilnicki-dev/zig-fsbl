@@ -524,7 +524,7 @@ inline fn addRegClobber(reg: armv7_general_register) void {
     }
 }
 
-inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_register {
+pub inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_register {
     switch (@typeInfo(@TypeOf(value))) {
         .pointer => {
             asm volatile (print("mov {s}, %[addr]", .{@tagName(reg)})
@@ -548,7 +548,7 @@ inline fn SET(reg: armv7_general_register, value: anytype) armv7_general_registe
     return reg;
 }
 
-inline fn LOAD(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7_general_register, address: armv7_general_register) armv7_general_register {
+pub inline fn LOAD(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7_general_register, address: armv7_general_register) armv7_general_register {
     asm volatile (print("{s} {s}, [{s}]", .{ switch (size) {
             .Byte => "ldrb",
             .HalfWord => "ldrh",

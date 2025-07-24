@@ -1,5 +1,5 @@
-const qsmp = @import("qsmp.zig");
 const arch = @import("arch.zig");
+const plat = @import("plat.zig");
 
 const goto = arch.goto;
 const call = arch.call;
@@ -42,6 +42,7 @@ export fn Reset_Handler() callconv(.naked) void {
     call(arch.ResetMemory);
 
     call(arch.InitializeMMU);
+    call(plat.Initialize);
     arch.EndlessLoop();
 }
 

@@ -1229,7 +1229,16 @@ const TZC = struct {
     }
 };
 
-const RCC = struct {
+pub const PWR = struct { // Power Control: 436[1]
+    port: BusType,
+    usingnamespace PeripheryCommon(@This(), Reg);
+
+    const Reg = enum(BusType) {
+        PWR_CR1 = 0, // Power Control Register 1: 486[1]
+    };
+};
+
+pub const RCC = struct {
     port: BusType,
     usingnamespace PeripheryCommon(@This(), Reg);
     const ClockSource = enum { HSI, HSE, CSI };
