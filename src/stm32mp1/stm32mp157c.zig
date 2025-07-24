@@ -1,3 +1,5 @@
+// Reference documentation: STM RM0436 Rev 6 [#1]
+// Memory Map: 158[1]
 const keep = @import("std").mem.doNotOptimizeAway;
 // platform specifics
 const BusType: type = u32;
