@@ -84,6 +84,14 @@ pub const sdmmc2 = bus.ahb6.sdmmc2;
 // pripheries private aliasing
 
 // private basic types
+fn PeripheryCommon(comptime T: anytype, comptime R: @TypeOf(enum {})) type {
+    return struct {
+        fn getReg(self: *const T, reg: R) BusType {
+            return self.port + @intFromEnum(reg);
+        }
+    };
+}
+
 const Field = struct {
     pub const RwType = enum {
         ReadOnly,
@@ -160,6 +168,7 @@ const SDMMC = struct {
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
     app_cmd_addr: u32 = 0,
+    usingnamespace PeripheryCommon(@This(), Reg);
 
     pub const Error = error{
         Unsupported,
@@ -174,9 +183,6 @@ const SDMMC = struct {
         eMMC,
     };
 
-    fn getReg(self: *SDMMC, reg: Reg) BusType {
-        return self.port + @intFromEnum(reg);
-    }
     const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
 
     pub fn setClockSource(self: *SDMMC, clock_source: ClockSource) void {
@@ -630,10 +636,8 @@ const UART = struct {
     idx: comptime_int,
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
+    usingnamespace PeripheryCommon(@This(), Reg);
 
-    fn getReg(self: *const UART, comptime reg: Reg) BusType {
-        return self.port + @intFromEnum(reg);
-    }
     const ClockSource = enum { HSI }; // TODO: add support for other clock sources
     const Reg = enum(BusType) {
         CR1 = 0x0, // USART control register 1 (USART_CR1)
@@ -1196,6 +1200,7 @@ const PLL = struct {
 
 const TZC = struct {
     port: BusType,
+    usingnamespace PeripheryCommon(@This(), Reg);
     const Reg = enum(BusType) {
         GATE_KEEPER = 0x8,
         SPECULATION_CTRL = 0xC,
@@ -1203,9 +1208,6 @@ const TZC = struct {
         ID_ACCESS0 = 0x114,
     };
 
-    fn getReg(self: TZC, reg: Reg) BusType {
-        return self.port + @intFromEnum(reg);
-    }
     pub fn initSecureDDRAccess(self: TZC) void {
         rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 11 }); // TZC1EN
         rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZC2EN
@@ -1227,9 +1229,7 @@ const TZC = struct {
 
 const RCC = struct {
     port: BusType,
-    fn getReg(self: *const RCC, reg: Reg) BusType {
-        return self.port + @intFromEnum(reg);
-    }
+    usingnamespace PeripheryCommon(@This(), Reg);
     const ClockSource = enum { HSI, HSE, CSI };
     const ClockMuxer = struct {
         src: FieldDesc,
@@ -1369,9 +1369,7 @@ const RCC = struct {
 const GPIO = struct {
     port: BusType,
     rcc_switch: RCC.PeripherySwitch,
-    fn getReg(self: *const GPIO, reg: Reg) BusType {
-        return self.port + @intFromEnum(reg);
-    }
+    usingnamespace PeripheryCommon(@This(), Reg);
     const Reg = enum(BusType) {
         MODER = 0x0,
         OTYPER = 0x4,
