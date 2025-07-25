@@ -88,8 +88,11 @@ pub const sdmmc2 = bus.ahb6.sdmmc2;
 // private basic types
 fn PeripheryCommon(comptime T: anytype, comptime R: @TypeOf(enum {})) type {
     return struct {
-        fn getReg(self: *const T, reg: R) BusType {
-            return self.port + @intFromEnum(reg);
+        fn getReg(self: *const T, r: R) BusType {
+            return self.port + @intFromEnum(r);
+        }
+        fn reg(self: *const T, r: R) Register {
+            return .{ .addr = self.port + @intFromEnum(r) };
         }
     };
 }
@@ -139,6 +142,9 @@ const Field = struct {
 
 const Register = struct {
     addr: BusType,
+    fn field(self: *const Register, shift: FieldShiftType, width: anytype, rw: Field.RwType) Field {
+        return Field{ .reg = self.addr, .shift = shift, .width = @bitSizeOf(width), .rw = rw };
+    }
     inline fn reset(self: *const Register) void {
         self.set(0x0);
     }
