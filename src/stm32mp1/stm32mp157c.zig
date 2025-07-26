@@ -1235,6 +1235,15 @@ const TZC = struct {
     }
 };
 
+pub const SYSCFG = struct {
+    port: BusType,
+    usingnamespace PeripheryCommon(@This(), Reg);
+    const Reg = enum(BusType) {
+
+    };
+
+};
+
 pub const PWR = struct { // Power Control: 436[1]
     port: BusType,
     usingnamespace PeripheryCommon(@This(), Reg);
@@ -1406,7 +1415,7 @@ pub const RCC = struct {
     };
 };
 
-const GPIO = struct {
+pub const GPIO = struct {
     port: BusType,
     rcc_switch: RCC.PeripherySwitch,
     usingnamespace PeripheryCommon(@This(), Reg);
@@ -1428,7 +1437,7 @@ const GPIO = struct {
         return .{ .gpio = self, .pin = nr };
     }
 
-    const Pin = struct {
+    pub const Pin = struct {
         gpio: *const GPIO,
         pin: u4,
 

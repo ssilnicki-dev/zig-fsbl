@@ -104,9 +104,9 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     const bin = b.addObjCopy(fsbl_elf.getEmittedBin(), .{ .format = .bin });
     const copy_bin = b.addInstallBinFile(bin.getOutput(), "qsmp-fsbl.bin");
     const elf2_run_step = b.addRunArtifact(stm32header_elf);
-    const copy_elf_qemu = b.addInstallArtifact(fsbl_elf_qemu, .{});
+    // const copy_elf_qemu = b.addInstallArtifact(fsbl_elf_qemu, .{});
 
-    copy_elf.step.dependOn(&copy_elf_qemu.step);
+    // copy_elf.step.dependOn(&copy_elf_qemu.step);
     bin.step.dependOn(&copy_elf.step);
     bin.step.dependOn(&sysram_elf2_run_step.step);
     bin.step.dependOn(&copy_ddr_part_elf.step);
