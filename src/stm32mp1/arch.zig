@@ -16,8 +16,9 @@ const Mode = enum(u5) {
 };
 
 const ID_MMFR4 = struct { // Memory Model Feature Register 4: G8-12089[1]
-    usingnamespace CP15Reg(0, 0, 2, 6, .ReadOnly);
-    pub const CnP = ID_PFR0.Field(12, 4, enum(u4) { Supported = 0b001 }); // Common not Private
+    const common = CP15Reg(0, 0, 2, 6, .ReadOnly);
+    const Field = common.Field;
+    pub const CnP = ID_MMFR4.Field(12, 4, enum(u4) { Supported = 0b001 }); // Common not Private
 };
 
 const TLBIALL = CP15Reg(0, 8, 7, 0, .WriteOnly); // TLB Invalidate All: G8-12240
@@ -56,11 +57,15 @@ const MemoryAttribute = enum(u8) {
 const MAIR = struct {
     pub const AttrIndexIntType = u3;
     const MAIR0 = struct { // Memory Attribute Indirection Register 0: G8-12129[1]
-        usingnamespace CP15Reg(0, 10, 2, 0, .ReadWrite);
+        const common = CP15Reg(0, 10, 2, 0, .ReadWrite);
+        const Field = common.Field;
+        const writeFrom = common.writeFrom;
     };
 
     const MAIR1 = struct { // Memory Attribute Indirection Register 1: G8-12133[1]
-        usingnamespace CP15Reg(0, 10, 2, 1, .ReadWrite);
+        const common = CP15Reg(0, 10, 2, 1, .ReadWrite);
+        const Field = common.Field;
+        const writeFrom = common.writeFrom;
     };
     const Attr0 = MAIR0.Field(0, 8, MemoryAttribute); // Attribute 0
     const Attr1 = MAIR0.Field(8, 8, MemoryAttribute); // ...
@@ -103,9 +108,11 @@ const MAIR = struct {
     }
 };
 
-fn TTBR(namespace: anytype) type {
+fn TTBR(common: anytype) type {
     return struct {
-        usingnamespace namespace;
+        const writeFrom = common.writeFrom;
+        const ExtendedField = common.ExtendedField;
+        const ExtendedBit = common.ExtendedBit;
         const self = @This();
         // When TTBCR.EAE = 0. Unused alternative
         const TTB = undefined; // Translation table base address.
@@ -131,7 +138,10 @@ const TTBR0 = TTBR(CP15Reg(0, 2, 0, 0, .ReadWrite)); // Translation Table Base R
 const TTBR1 = undefined; // Translation Table Base Register 1: G8-12314[1]
 
 const TTBCR = struct { // Translation Table Base Control Register: G8-12293[1]
-    usingnamespace CP15Reg(0, 2, 0, 2, .ReadWrite);
+    const common = CP15Reg(0, 2, 0, 2, .ReadWrite);
+    const writeFrom = common.writeFrom;
+    const Bit = common.Bit;
+    const Field = common.Field;
     pub const EAE = TTBCR.Bit(31); // Extended Address Enable
     // When TTBCR.EAE = 0. Unused alternative
     const PD1 = undefined; // Translation table walk disable for translating using TTBR1
@@ -177,79 +187,98 @@ const TTBCR = struct { // Translation Table Base Control Register: G8-12293[1]
 };
 
 const ACTLR = struct { // Auxilary Control Register: G8-11795[1], 4-59[2]
-    usingnamespace CP15Reg(0, 1, 0, 1, .ReadWrite);
+    const common = CP15Reg(0, 1, 0, 1, .ReadWrite);
+    const Bit = common.Bit;
     pub const SMP = ACTLR.Bit(6); // Coherent requests to the processor
 };
 
 const CTR = struct { // Cache Type Register: G8-11868[1]
-    usingnamespace CP15Reg(0, 0, 0, 1, .ReadOnly);
+    const common = CP15Reg(0, 0, 0, 1, .ReadOnly);
+    const Field = common.Field;
     pub const DminLine = CTR.Field(16, 4, enum {}); // Log2 of the number of words in the smallest cache line
 
 };
 
 const DCIMVAC = struct { // Data Cache line Invalidate by VA to Point of Coherency: G8-11883[1]
-    usingnamespace CP15Reg(0, 7, 6, 1, .WriteOnly);
+    const common = CP15Reg(0, 7, 6, 1, .WriteOnly);
+    const write = common.write;
 };
 
 const MPIDR = struct { // Multiprocessor Affinity Register: G8-12140[1]
-    usingnamespace CP15Reg(0, 0, 0, 5, .ReadOnly);
+    const common = CP15Reg(0, 0, 0, 5, .ReadOnly);
+    const Field = common.Field;
     pub const Aff1 = MPIDR.Field(8, 8, enum(u8) { CLUSTER0 = 0 });
     pub const Aff0 = MPIDR.Field(0, 8, enum(u8) { CPU0 = 0 });
 };
 
 const CPSR = struct { // Current Program Status Register: G8-11861[1]
-    usingnamespace SysReg(.cpsr, .mrs, .msr);
+    const common = SysReg(.cpsr, .mrs, .msr);
+    const Bit = common.Bit;
     pub const DIT = CPSR.Bit(21); // Data Independent Timing
 };
 
 const ID_PFR0 = struct { // Processor Feature Register 0: G8-12095[1]
-    usingnamespace CP15Reg(0, 0, 1, 0, .ReadOnly);
-    pub const DIT = ID_PFR0.Field(24, 4, enum(u4) { Implemented = 0b001 }); // Data Independent Timing
+    const common = CP15Reg(0, 0, 1, 0, .ReadOnly);
+    const Field = common.Field;
+    pub const DIT = Field(24, 4, enum(u4) { Implemented = 0b001 }); // Data Independent Timing
 };
 
 const PMCR = struct { // Performance Monitor Control Register: G8-12525[1]
-    usingnamespace CP15Reg(0, 9, 12, 0, .ReadWrite);
+    const common = CP15Reg(0, 9, 12, 0, .ReadWrite);
+    const Bit = common.Bit;
+    const writeFrom = common.writeFrom;
     pub const DP = PMCR.Bit(5); // Disable cycle counter when event counting Prohibited
     pub const ResetValue = 0;
 };
 
 const SCR = struct { // Secure Configuration Register: G8-12190[1]
-    usingnamespace CP15Reg(0, 1, 1, 0, .ReadWrite);
+    const common = CP15Reg(0, 1, 1, 0, .ReadWrite);
+    const writeFrom = common.writeFrom;
+    const Bit = common.Bit;
     pub const SIF = SCR.Bit(9); // Secure Instruction Fetch
     pub const ResetValue = 0;
 };
 
 const VBAR = struct { // Vector Base Address Register: G8-12321[1]
-    usingnamespace CP15Reg(0, 12, 0, 0, .ReadWrite);
+    const common = CP15Reg(0, 12, 0, 0, .ReadWrite);
+    const writeFrom = common.writeFrom;
 };
 
 const MVBAR = struct { // Monitor Vector Base Register: G8-12143[1]
-    usingnamespace CP15Reg(0, 12, 0, 1, .ReadWrite);
+    const common = CP15Reg(0, 12, 0, 1, .ReadWrite);
+    const writeFrom = common.writeFrom;
 };
 
 const SCTLR = struct { // System Control Register: G8-12196[1]
-    usingnamespace CP15Reg(0, 1, 0, 0, .ReadWrite);
-    pub const DSSBS = SCTLR.Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 }); // Default Speculative Store Bypass Safe value on exception
-    pub const TE = SCTLR.Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 }); // T32 Exception Enable
-    pub const EE = SCTLR.Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 }); // Endianess on Exception
-    pub const WXN = SCTLR.Bit(19); // Write permission implies XN (Execute-never)
-    pub const NTWE = SCTLR.Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFE at EL0
-    pub const NTWI = SCTLR.Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFI at EL0
-    pub const V = SCTLR.Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 }); // Vectors bit
-    pub const I = SCTLR.Bit(12); // Instruction access Cacheability control, for accesses from EL1 and EL0
-    pub const CP15BEN = SCTLR.Bit(5); // System instruction memory barrier enable
-    pub const C = SCTLR.Bit(2); // Cecheability control, for data accesses at EL1 and EL0
-    pub const A = SCTLR.Bit(1); // Alignment ckeck enable
-    pub const M = SCTLR.Bit(0); // MMU enablefor EL1 ad EL0 stage 1 translation
-    const ReservedBit23 = SCTLR.ReservedBit(23, 1); // aka SPAN
-    const ReservedBit22 = SCTLR.ReservedBit(22, 1); // RES1
-    const ReservedBit04 = SCTLR.ReservedBit(4, 1); // aka LSMAOE
-    const ReservedBit03 = SCTLR.ReservedBit(3, 1); // aka nTLSMD
+    const common = CP15Reg(0, 1, 0, 0, .ReadWrite);
+    const Field = common.Field;
+    const Bit = common.Bit;
+    const ReservedBit = common.ReservedBit;
+    const writeFrom = common.writeFrom;
+    pub const DSSBS = Field(31, 1, enum(u1) { DisableMitigation = 0, EnableMitigation = 1 }); // Default Speculative Store Bypass Safe value on exception
+    pub const TE = Field(30, 1, enum(u1) { ARM = 0, Thumb = 1 }); // T32 Exception Enable
+    pub const EE = Field(25, 1, enum(u1) { LittleEndian = 0, BigEndian = 1 }); // Endianess on Exception
+    pub const WXN = Bit(19); // Write permission implies XN (Execute-never)
+    pub const NTWE = Field(18, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFE at EL0
+    pub const NTWI = Field(16, 1, enum(u1) { Trapped = 0, NotTrapped = 1 }); // Trap execution of WFI at EL0
+    pub const V = Field(13, 1, enum(u1) { LowVectors = 0, HiVectors = 1 }); // Vectors bit
+    pub const I = Bit(12); // Instruction access Cacheability control, for accesses from EL1 and EL0
+    pub const CP15BEN = Bit(5); // System instruction memory barrier enable
+    pub const C = Bit(2); // Cecheability control, for data accesses at EL1 and EL0
+    pub const A = Bit(1); // Alignment ckeck enable
+    pub const M = Bit(0); // MMU enablefor EL1 ad EL0 stage 1 translation
+    const ReservedBit23 = ReservedBit(23, 1); // aka SPAN
+    const ReservedBit22 = ReservedBit(22, 1); // RES1
+    const ReservedBit04 = ReservedBit(4, 1); // aka LSMAOE
+    const ReservedBit03 = ReservedBit(3, 1); // aka nTLSMD
     pub const ResetValue = ReservedBit23.asU32() | ReservedBit22.asU32() | ReservedBit04.asU32() | ReservedBit03.asU32();
 };
 
 const CPACR = struct { // Architectural Feature Access Control Register: G8-11852[1]
-    usingnamespace CP15Reg(0, 1, 0, 2, .ReadWrite);
+    const common = CP15Reg(0, 1, 0, 2, .ReadWrite);
+    const Field = common.Field;
+    const Bit = common.Bit;
+    const writeFrom = common.writeFrom;
     pub const CP10 = CPACR.Field(20, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
     pub const CP11 = CPACR.Field(22, 2, enum(u2) { Disabled = 0b0, PL1Only = 0b1, Enabled = 0b11 });
     pub const TRCDIS = CPACR.Bit(28); // Traps PL0 and PL1 access to all trace registers to Undefined Mode
@@ -257,7 +286,10 @@ const CPACR = struct { // Architectural Feature Access Control Register: G8-1185
 };
 
 const NSACR = struct { // Non-Secure Access Control Register: G8-12162[1]
-    usingnamespace CP15Reg(0, 1, 1, 2, .ReadWrite);
+    const common = CP15Reg(0, 1, 1, 2, .ReadWrite);
+    const writeFrom = common.writeFrom;
+    const Field = common.Field;
+    const Bit = common.Bit;
     pub const AllCPAccessInNonSecureState = NSACR.Field(0, 14, enum(u1) { Disabled = 0 });
     pub const CP10 = NSACR.Field(10, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 }); //Defines access rights for SIMD and FP functionality
     pub const CP11 = NSACR.Field(11, 1, enum(u1) { SecureAccessOnly = 0, AccessFromAnySecureState = 1 }); // unused, must follow CP10
@@ -265,24 +297,36 @@ const NSACR = struct { // Non-Secure Access Control Register: G8-12162[1]
 };
 
 const ID_DFR0 = struct { // Debug Feature Register: G8-12037[1]
-    usingnamespace CP15Reg(0, 0, 1, 2, .ReadOnly);
+    const common = CP15Reg(0, 0, 1, 2, .ReadOnly);
+    const Field = common.Field;
     pub const CopTrc = ID_DFR0.Field(12, 4, enum(u4) { Implemented = 0b0001 }); // Support for System registers-based model, using registers in the coproc == 0b1110 encoding space
 };
 
 const FPEXC = struct { // Floating Point Excepion Register: G8-11910[1]
-    usingnamespace SysReg(.fpexc, .vmrs, .vmsr);
+    const common = SysReg(.fpexc, .vmrs, .vmsr);
+    const ReservedField = common.ReservedField;
+    const Bit = common.Bit;
+    const writeFrom = common.writeFrom;
     pub const VECITR = FPEXC.ReservedField(8, 3, 0b111); // Vector Iteration count
     pub const EN = FPEXC.Bit(30); // Enable Access to SIMD and FP functionality
     pub const ResetValue = VECITR.asU32();
 };
 
 const BSEC_DENABLE = struct {
-    usingnamespace PlatformReg(0x5C005014);
+    const common = PlatformReg(0x5C005014);
+    const writeFrom = common.writeFrom;
 };
 
 fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u3, comptime rw: enum { ReadOnly, ReadWrite, WriteOnly }) type {
     return struct {
-        pub usingnamespace GenericAccessors(@This());
+        const generic = GenericAccessors(@This());
+        pub const Field = generic.Field;
+        pub const Bit = generic.Bit;
+        pub const ExtendedField = generic.ExtendedField;
+        pub const ExtendedBit = generic.ExtendedBit;
+        pub const ReservedField = generic.ReservedField;
+        pub const ReservedBit = generic.ReservedBit;
+        // pub const common = GenericAccessors(@This());
         inline fn readTo(comptime access_reg: anytype) void {
             switch (rw) {
                 .WriteOnly => {
@@ -340,7 +384,9 @@ fn CP15Reg(comptime op1: u3, comptime crn: u4, comptime crm: u4, comptime op2: u
 
 fn SysReg(comptime register: @TypeOf(.@"enum"), comptime read_instruction: @TypeOf(.@"enum"), comptime write_instruction: @TypeOf(.@"enum")) type {
     return struct {
-        usingnamespace GenericAccessors(@This());
+        const common = GenericAccessors(@This());
+        const ReservedField = common.ReservedField;
+        const Bit = common.Bit;
         inline fn readTo(comptime access_reg: armv7_general_register) void {
             asm volatile (print("{s} {s}, {s}", .{ @tagName(read_instruction), @tagName(access_reg), @tagName(register) }));
         }
@@ -352,7 +398,7 @@ fn SysReg(comptime register: @TypeOf(.@"enum"), comptime read_instruction: @Type
 
 fn PlatformReg(addr: comptime_int) type {
     return struct {
-        pub usingnamespace GenericAccessors(@This());
+        pub const common = GenericAccessors(@This());
         inline fn writeFrom(reg: armv7_general_register) void {
             const tmp = switch (reg) {
                 .r0 => .r1,
@@ -422,8 +468,7 @@ fn GenericAccessors(self: type) type {
                         :
                         : [low] "r" (@as(u32, @truncate(reg))),
                           [high] "r" (@as(u32, @intCast(reg >> 32))),
-                        : "r0", "r1", "cc"
-                    );
+                        : .{ .r0 = true, .r1 = true });
                     self.writeFrom(.{ .r0, .r1 });
                     asm volatile ("pop {r0, r1}");
                 }
@@ -444,8 +489,7 @@ fn GenericAccessors(self: type) type {
                         : [low] "=r" (lo),
                           [high] "=r" (hi),
                         :
-                        : "r0", "r1", "cc"
-                    );
+                        : .{ .r0 = true, .r1 = true });
                     asm volatile ("pop {r0, r1}");
                     return (@as(u64, @intCast(hi)) << 32) + lo;
                 }
@@ -470,8 +514,7 @@ fn GenericAccessors(self: type) type {
                         \\ mov %[value], r0
                         : [value] "=r" (value),
                         :
-                        : "r0", "cc"
-                    );
+                        : .{ .r0 = true });
                     return @truncate((value & mask) >> shift);
                 }
                 pub inline fn Select(comptime v: values) void {
@@ -514,12 +557,12 @@ fn GenericAccessors(self: type) type {
 
 inline fn addRegClobber(reg: armv7_general_register) void {
     switch (reg) {
-        .r0 => asm volatile ("" ::: "r0"),
-        .r1 => asm volatile ("" ::: "r1"),
-        .r2 => asm volatile ("" ::: "r2"),
-        .r3 => asm volatile ("" ::: "r3"),
-        .r4 => asm volatile ("" ::: "r4"),
-        .r5 => asm volatile ("" ::: "r5"),
+        .r0 => asm volatile ("" ::: .{ .r0 = true }),
+        .r1 => asm volatile ("" ::: .{ .r1 = true }),
+        .r2 => asm volatile ("" ::: .{ .r2 = true }),
+        .r3 => asm volatile ("" ::: .{ .r3 = true }),
+        .r4 => asm volatile ("" ::: .{ .r4 = true }),
+        .r5 => asm volatile ("" ::: .{ .r5 = true }),
         .sp => {},
     }
 }
@@ -553,7 +596,7 @@ pub inline fn LOAD(comptime size: enum { Byte, HalfWord, Word }, comptime reg: a
             .Byte => "ldrb",
             .HalfWord => "ldrh",
             .Word => "ldr",
-        }, @tagName(reg), @tagName(address) }) ::: "memory");
+        }, @tagName(reg), @tagName(address) }) ::: .{ .memory = true });
     addRegClobber(reg);
     return reg;
 }
@@ -563,7 +606,7 @@ inline fn SAVE(comptime size: enum { Byte, HalfWord, Word }, comptime reg: armv7
             .Byte => "strb",
             .HalfWord => "strh",
             .Word => "str",
-        }, @tagName(reg), @tagName(address) }) ::: "memory");
+        }, @tagName(reg), @tagName(address) }) ::: .{ .memory = true });
 }
 
 inline fn DO(comptime op: enum { Add, Sub, LeftShift, ClearBits, Mul }, reg: armv7_general_register, arg: anytype) void {
@@ -599,6 +642,7 @@ inline fn LABEL(comptime name: comptime_int) void {
 }
 
 inline fn IF(comptime reg: armv7_general_register, comptime condition: enum { Equal, NotEqual, LowerUnsigned }, comptime cmp_value: anytype, comptime action: anytype, comptime action_argument: anytype) void {
+    @setEvalBranchQuota(100_000);
     const tmp_reg = switch (@TypeOf(cmp_value)) {
         @TypeOf(reg) => switch (cmp_value) {
             reg => @compileError("Comparing register with ifself makes no sence"),
@@ -638,8 +682,10 @@ pub inline fn EndlessLoop() void {
 }
 
 export fn parkingLoop() callconv(.naked) void {
-    asm volatile ("nop");
-    asm volatile ("b . -2");
+    @at(.label);
+    asm volatile("label:");
+    asm volatile ("b .");
+
 }
 
 pub inline fn goto(comptime func: anytype) void {
@@ -815,7 +861,7 @@ pub inline fn InitializeStacks() void {
     _ = SET(.sp, SUB(stack_addr, abt_stack_size));
 
     SetMode(.Monitor);
-    asm volatile ("" ::: "r0", "r1", "r2", "r3", "r4", "r5");
+    asm volatile ("" ::: .{ .r0 = true, .r1 = true, .r2 = true, .r3 = true, .r4 = true, .r5 = true });
 }
 
 const fiq_stack_size = 512;

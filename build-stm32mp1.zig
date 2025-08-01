@@ -27,15 +27,25 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     };
     const resolver_target = b.resolveTargetQuery(armv7a_target);
 
-    const fsbl_elf = b.addExecutable(.{
-        .name = "qsmp-fsbl",
+    const fsbl = b.addModule("qsmp-fsbl", .{
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
         .target = resolver_target,
-        .optimize = optimize,
-        .strip = false,
-        .unwind_tables = .none,
     });
-    fsbl_elf.entry = .{.symbol_name = "EntryPoint"};
+
+    const fsbl_elf = b.addExecutable(.{
+        .name = "qsmp-fsbl",
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
+            .target = resolver_target,
+            .optimize = optimize,
+            .strip = false,
+            .unwind_tables = .none,
+            .imports = &.{
+                .{ .name = "qsmp-fsbl", .module = fsbl },
+            },
+        }),
+    });
+    fsbl_elf.entry = .{ .symbol_name = "EntryPoint" };
     fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker.ld" } });
     fsbl_elf.link_gc_sections = true;
     fsbl_elf.link_function_sections = true;
@@ -44,45 +54,68 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
 
     const fsbl_elf_qemu = b.addExecutable(.{
         .name = "qsmp-fsbl-qemu",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
-        .target = resolver_target,
-        .optimize = optimize,
-        .strip = false,
-        .unwind_tables = .none,
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/fsbl.zig" } },
+            .target = resolver_target,
+            .optimize = optimize,
+            .strip = false,
+            .unwind_tables = .none,
+            .imports = &.{
+                .{ .name = "qsmp-fsbl", .module = fsbl },
+            },
+        }),
     });
-    fsbl_elf_qemu.entry = .{.symbol_name = "Reset_Handler"};
+    fsbl_elf_qemu.entry = .{ .symbol_name = "Reset_Handler" };
     fsbl_elf_qemu.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/linker-qemu.ld" } });
     fsbl_elf_qemu.link_gc_sections = true;
     fsbl_elf_qemu.link_function_sections = true;
     fsbl_elf_qemu.link_data_sections = true;
     // fsbl_elf.want_lto = true;
 
-
     const sysram_part_elf = b.addExecutable(.{
         .name = "sysram-part",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.zig" } },
-        .target = resolver_target,
-        .optimize = optimize,
-        .strip = false,
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.zig" } },
+            .target = resolver_target,
+            .optimize = optimize,
+            .strip = false,
+            .imports = &.{
+                .{ .name = "qsmp-fsbl", .module = fsbl },
+            },
+        }),
     });
     sysram_part_elf.addAssemblyFile(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.S" } });
     sysram_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/sysram_part.ld" } });
 
     const ddr_part_elf = b.addExecutable(.{
         .name = "ddr-part",
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.zig" } },
-        .target = resolver_target,
-        .optimize = optimize,
-        .strip = false,
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.zig" } },
+            .target = resolver_target,
+            .optimize = optimize,
+            .strip = false,
+            .imports = &.{
+                .{ .name = "qsmp-fsbl", .module = fsbl },
+            },
+        }),
     });
     ddr_part_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/ddr_part.ld" } });
 
-    const stm32header_elf = b.addExecutable(.{
-        .name = "stm32header",
+    const header = b.addModule("stm32header", .{
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/stm32header.zig" } },
         .target = standard_target,
-        .optimize = .ReleaseFast,
-        .strip = true,
+    });
+    const stm32header_elf = b.addExecutable(.{
+        .name = "stm32header",
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/stm32header.zig" } },
+            .target = standard_target,
+            .optimize = .ReleaseFast,
+            .strip = true,
+            .imports = &.{
+                .{ .name = "stm32header", .module = header },
+            },
+        }),
     });
     stm32header_elf.linkSystemLibrary("c");
 
@@ -104,9 +137,9 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     const bin = b.addObjCopy(fsbl_elf.getEmittedBin(), .{ .format = .bin });
     const copy_bin = b.addInstallBinFile(bin.getOutput(), "qsmp-fsbl.bin");
     const elf2_run_step = b.addRunArtifact(stm32header_elf);
-    const copy_elf_qemu = b.addInstallArtifact(fsbl_elf_qemu, .{});
+    // const copy_elf_qemu = b.addInstallArtifact(fsbl_elf_qemu, .{});
 
-    copy_elf.step.dependOn(&copy_elf_qemu.step);
+    // copy_elf.step.dependOn(&copy_elf_qemu.step);
     bin.step.dependOn(&copy_elf.step);
     bin.step.dependOn(&sysram_elf2_run_step.step);
     bin.step.dependOn(&copy_ddr_part_elf.step);
@@ -120,9 +153,7 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     b.default_step.dependOn(&elf2_run_step.step);
 
     const regmap_unit_tests = b.addTest(.{
-        .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/stm32mp1/stm32mp157c.zig" } },
-        .target = standard_target,
-        .optimize = .ReleaseSafe,
+        .root_module = fsbl_elf.root_module,
     });
 
     const run_regmap_unit_tests = b.addRunArtifact(regmap_unit_tests);

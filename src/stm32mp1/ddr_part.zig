@@ -21,8 +21,7 @@ export fn _start() callconv(.naked) void {
     );
 
     asm volatile ("bl ddr_main");
-    asm volatile ("nop");
-    asm volatile ("b .-2");
+    asm volatile ("b .");
 }
 
 export fn ddr_main() void {
