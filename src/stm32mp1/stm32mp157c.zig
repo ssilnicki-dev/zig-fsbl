@@ -1238,6 +1238,12 @@ const TZC = struct {
     }
 };
 
+pub const SYSCFG = struct {
+    port: BusType,
+    const common = PeripheryCommon(@This(), Reg);
+    const Reg = enum(BusType) {};
+};
+
 pub const PWR = struct { // Power Control: 436[1]
     port: BusType,
     const common = PeripheryCommon(@This(), Reg);
@@ -1246,6 +1252,11 @@ pub const PWR = struct { // Power Control: 436[1]
     const Reg = enum(BusType) {
         PWR_CR1 = 0, // Power Control Register 1: 486[1]
     };
+    pub fn backupDomainWriteProtection(self: *const PWR, value: enum(u1) { Enable = 0, Disable = 1 }) void {
+        const dbp = self.reg(.PWR_CR1).field(8, u1, .ReadWrite);
+        dbp.set(@intFromEnum(value));
+        while (dbp.get() != @intFromEnum(value)) {}
+    }
 };
 
 pub const RCC = struct {
@@ -1270,6 +1281,13 @@ pub const RCC = struct {
     };
 
     const HSEMode = enum { Crystal };
+    const RTCSource = enum(u4) { NoClock = 0, LSE = 1, LSI = 2, HSE = 3 }; // 733[1]
+
+    pub fn enableCSI(self: *const RCC) void {
+        self.reg(.RCC_OCENSETR).field(4, u1, .ReadWrite).set(1); // CSION: 643[1]
+        const csirdy = self.reg(.RCC_OCRDYR).field(4, u1, .ReadOnly); // CSIRDY: 646[1]
+        while (csirdy.isCleared()) {}
+    }
 
     pub fn enableHSE(self: *const RCC, mode: HSEMode, fq: u32) void {
         hse_fq_hz = fq;
@@ -1277,18 +1295,18 @@ pub const RCC = struct {
             .Crystal => {
                 const ocenclrr = self.getReg(.OCENCLRR);
                 (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> Off
-                const hserdy: Field = .{ .reg = self.getReg(.OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
+                const hserdy: Field = .{ .reg = self.getReg(.RCC_OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
                 while (hserdy.isAsserted()) {}
                 (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 10, .width = 1 }).set(1); // HSEBYP -> Off
-                (Field{ .reg = self.getReg(.OCENSETR), .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> On
+                (Field{ .reg = self.getReg(.RCC_OCENSETR), .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> On
                 while (hserdy.isCleared()) {}
             },
         }
     }
 
     fn getOutputFrequency(self: *const RCC, clock: ClockSource) u32 {
-        const ocrdyr = self.getReg(.OCRDYR);
-        const ocensetr = self.getReg(.OCENSETR);
+        const ocrdyr = self.getReg(.RCC_OCRDYR);
+        const ocensetr = self.getReg(.RCC_OCENSETR);
         switch (clock) {
             .HSI => {
                 if ((Field{ .reg = ocensetr, .shift = 0, .width = 1 }).isCleared())
@@ -1340,8 +1358,19 @@ pub const RCC = struct {
         }
     }
 
+    pub fn getRTCSource(self: *const RCC) RTCSource {
+        return @enumFromInt(self.reg(.RCC_BDCR).field(16, u2, .ReadWrite).get()); // RTCSRC: RTC clock source selection : 733[1]
+    }
+
+    pub fn resetVSwitchDomain(self: *const RCC) void {
+        const vswrst = self.reg(.RCC_BDCR).field(31, u1, .ReadWrite); // VSWRST: V Switch domain software reset: 733[1]
+        vswrst.set(1);
+        while (vswrst.isCleared()) {}
+        vswrst.set(0);
+    }
+
     const Reg = enum(BusType) {
-        OCENSETR = 0x0C, // RCC oscillator clock enable set register (RCC_OCENSETR)
+        RCC_OCENSETR = 0x0C, // RCC oscillator clock enable set register: 642[1]
         OCENCLRR = 0x10, // RCC oscillator clock enable clear register (RCC_OCENCLRR)
         HSICFGR = 0x18, // RCC HSI configuration register (RCC_HSICFGR)
         MPCKSELR = 0x20, // RCC MPU clock selection register (RCC_MPCKSELR)
@@ -1363,14 +1392,14 @@ pub const RCC = struct {
         PLL2FRACR = 0xA0, // RCC PLL2 fractional register (RCC_PLL2FRACR)
         PLL2CSGR = 0xA4, // RCC PLL2 clock spreading generator register (RCC_PLL2CSGR)
         DDRITFCR = 0xD8, // RCC DDR interface control register (RCC_DDRITFCR)
-        BDCR = 0x140, // RCC backup domain control register (RCC_BDCR)
+        RCC_BDCR = 0x140, // RCC backup domain control register: 733[1]
         AHB6RSTSETR = 0x198, // RCC AHB6 peripheral reset set register (RCC_AHB6RSTSETR)
         AHB6RSTCLRR = 0x19C, // RCC AHB6 peripheral reset set register (RCC_AHB6RSTSETR)
         MP_APB5ENSETR = 0x208, // RCC APB5 peripheral enable for MPU set register
         MP_APB5ENCLRR = 0x20C, // RCC APB5 peripheral enable for MPU clear register
         MP_AHB6ENSETR = 0x218, // RCC AHB6 peripheral enable for MPU set register
         MP_AHB6ENCLRR = 0x21C, // RCC AHB6 peripheral enable for MPU clear register
-        OCRDYR = 0x808, // RCC oscillator clock ready register (RCC_OCRDYR)
+        RCC_OCRDYR = 0x808, // RCC oscillator clock ready register: 646[1]
         RCK3SELR = 0x820, // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
         RCK4SELR = 0x824, // RCC PLL 3 reference clock selection register (RCC_RCK3SELR)
         PLL3CR = 0x880, // RCC PLL3 control register (RCC_PLL3CR)
@@ -1389,7 +1418,7 @@ pub const RCC = struct {
     };
 };
 
-const GPIO = struct {
+pub const GPIO = struct {
     port: BusType,
     rcc_switch: RCC.PeripherySwitch,
     const common = PeripheryCommon(@This(), Reg);
@@ -1412,7 +1441,7 @@ const GPIO = struct {
         return .{ .gpio = self, .pin = nr };
     }
 
-    const Pin = struct {
+    pub const Pin = struct {
         gpio: *const GPIO,
         pin: u4,
 

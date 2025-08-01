@@ -13,6 +13,14 @@ fn mapPeriphery() void {
 
 pub export fn Initialize() void {
     mapPeriphery();
+    pwr.backupDomainWriteProtection(.Disable);
+    if (rcc.getRTCSource() == .NoClock) { // Coldboot
+        rcc.resetVSwitchDomain();
+    }
+    // TODO: setup clocks/dividers/plls/muxers -> mostly refactoring
+    rcc.enableCSI(); // required for automatic IO compensation
+    asm volatile ("nop");
+    asm volatile ("nop");
 }
 
 noinline fn plat_panic(line: u32, err: anyerror) noreturn {
