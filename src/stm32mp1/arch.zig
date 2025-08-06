@@ -81,7 +81,8 @@ const MAIR = struct {
         MAIR1.writeFrom(reset);
     }
 
-    fn isMatch(comptime field: anytype, comptime attr: MemoryAttribute) bool {
+    // FIXME: abort exception if inlined into Fast optimized code
+    noinline fn isMatch(comptime field: anytype, comptime attr: MemoryAttribute) bool {
         return switch (field.Read()) {
             0 => brk: {
                 field.Select(attr);
