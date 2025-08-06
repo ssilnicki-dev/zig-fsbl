@@ -1265,6 +1265,20 @@ const TZC = struct {
 };
 
 const RCC = struct {
+pub const PWR = struct { // Power Control: 436[1]
+    port: BusType,
+    const reg = PeripheryCommon(@This(), Reg).reg;
+
+    const Reg = enum(BusType) {
+        CR1 = 0, // Power Control Register 1: 486[1]
+    };
+    pub fn backupDomainWriteProtection(self: *const PWR, value: enum(u1) { Enable = 0, Disable = 1 }) void {
+        const dbp = self.reg(.CR1).field(8, u1, .ReadWrite);
+        dbp.set(@intFromEnum(value));
+        while (dbp.get() != @intFromEnum(value)) {}
+    }
+};
+
     port: BusType,
     const common = PeripheryCommon(@This(), Reg);
     pub const getReg = common.getReg;
