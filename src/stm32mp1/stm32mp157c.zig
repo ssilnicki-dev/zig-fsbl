@@ -88,11 +88,37 @@ pub const sdmmc2 = bus.ahb6.sdmmc2;
 // private basic types
 fn PeripheryCommon(comptime T: anytype, comptime R: @TypeOf(enum {})) type {
     return struct {
-        fn getReg(self: *const T, reg: R) BusType {
-            return self.port + @intFromEnum(reg);
+        fn getReg(self: *const T, r: R) BusType {
+            return self.port + @intFromEnum(r);
+        }
+        fn reg(self: *const T, r: R) Register {
+            return .{ .addr = self.port + @intFromEnum(r) };
         }
     };
 }
+
+const Bit = struct {
+    pub const RwType = Field.RwType;
+    reg: BusType,
+    rw: RwType = .ReadWrite,
+    shift: FieldShiftType,
+
+    fn set(self: *const Bit) void {
+        (Field{ .reg = self.reg, .shift = self.shift, .width = 1, .rw = self.rw }).set(1);
+    }
+    fn clear(self: *const Bit) void {
+        (Field{ .reg = self.reg, .shift = self.shift, .width = 1, .rw = self.rw }).set(0);
+    }
+    fn get(self: *const Bit) BusType {
+        return (Field{ .reg = self.reg, .shift = self.shift, .width = 1, .rw = self.rw }).get();
+    }
+    fn isAsserted(self: *const Bit) bool {
+        return self.get() != 0;
+    }
+    fn isCleared(self: *const Bit) bool {
+        return self.get() == 0;
+    }
+};
 
 const Field = struct {
     pub const RwType = enum {
@@ -139,6 +165,12 @@ const Field = struct {
 
 const Register = struct {
     addr: BusType,
+    fn field(self: *const Register, shift: FieldShiftType, width: anytype, rw: Field.RwType) Field {
+        return Field{ .reg = self.addr, .shift = shift, .width = @bitSizeOf(width), .rw = rw };
+    }
+    fn bit(self: *const Register, shift: FieldShiftType, rw: Bit.RwType) Bit {
+        return Bit{ .reg = self.addr, .shift = shift, .rw = rw };
+    }
     inline fn reset(self: *const Register) void {
         self.set(0x0);
     }
@@ -154,12 +186,12 @@ const Register = struct {
             @compileError("Have to specify at least one bit for monitoring");
 
         var mask: BusType = 0;
-        for (bits) |bit| mask |= @as(@TypeOf(mask), 1) << bit;
+        for (bits) |b| mask |= @as(@TypeOf(mask), 1) << b;
 
         while (true) {
-            const bit = @bitSizeOf(@TypeOf(mask)) - @clz(self.get() & mask);
-            if (bit != 0)
-                return @truncate(bit - 1);
+            const b = @bitSizeOf(@TypeOf(mask)) - @clz(self.get() & mask);
+            if (b != 0)
+                return @truncate(b - 1);
         }
     }
 };
