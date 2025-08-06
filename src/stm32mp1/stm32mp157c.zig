@@ -71,7 +71,7 @@ pub const gpiod = bus.ahb4.gpiod;
 pub const gpioe = bus.ahb4.gpioe;
 pub const gpiog = bus.ahb4.gpiog;
 pub const uart4 = bus.apb1.uart4;
-pub const rcc = bus.ahb4.rcc;
+pub const obsolete_rcc = bus.ahb4.rcc;
 pub const pll1 = bus.pll1;
 pub const pll2 = bus.pll2;
 pub const pll3 = bus.pll3;
@@ -221,7 +221,7 @@ const SDMMC = struct {
     const ClockSource = enum(u3) { HCLK6 = 0, PLL3 = 1, PLL4 = 2, HSI = 3, Off }; // FIXME: current support for sdmmc1&2 only. sdmmc3 has other options
 
     pub fn setClockSource(self: *SDMMC, clock_source: ClockSource) void {
-        rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
+        obsolete_rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         switch (clock_source) {
             .PLL3 => pll3.enable(.R),
             .PLL4 => pll4.enable(.P),
@@ -230,12 +230,12 @@ const SDMMC = struct {
     }
 
     fn getRefClockHz(self: *SDMMC) BusType {
-        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
+        return switch (@as(ClockSource, @enumFromInt(obsolete_rcc.getMuxerValue(&self.mux)))) {
             .Off => 0,
             .HCLK6 => axi.getOutputFrequency(.HCLK6),
             .PLL3 => pll3.getOutputFrequency(.R),
             .PLL4 => pll4.getOutputFrequency(.P),
-            .HSI => rcc.getOutputFrequency(.HSI),
+            .HSI => obsolete_rcc.getOutputFrequency(.HSI),
         };
     }
 
@@ -618,7 +618,7 @@ const SDMMC = struct {
     }
 
     fn configure(self: *SDMMC, bus_clock_hz: BusType, mode: BusClockMode, width: BusWidth, power_save: BusPowerSave) void {
-        rcc.enablePeriphery(self.rcc_switch);
+        obsolete_rcc.enablePeriphery(self.rcc_switch);
         mpu.udelay(100);
         const ref_clock_hz = self.getRefClockHz();
         if (ref_clock_hz == 0)
@@ -722,8 +722,8 @@ const UART = struct {
     }
 
     pub fn configure(self: *const UART, clock_source: ClockSource, baud_rate: BaudRate, data_bits: DataBits, parity: Parity, stop_bits: StopBits) void {
-        rcc.setMuxerValue(&self.mux, self.resolveClockSource(clock_source));
-        rcc.enablePeriphery(self.rcc_switch);
+        obsolete_rcc.setMuxerValue(&self.mux, self.resolveClockSource(clock_source));
+        obsolete_rcc.enablePeriphery(self.rcc_switch);
 
         const uart_enable: Field = .{ .reg = self.getReg(.CR1), .shift = 0, .width = 1 };
         uart_enable.set(0);
@@ -737,7 +737,7 @@ const UART = struct {
         (Field{ .reg = self.getReg(.CR2), .shift = 12, .width = 2 }).set(@intFromEnum(stop_bits));
         const prescaler: u32 = 16;
         (Field{ .reg = self.getReg(.PRESC), .shift = 0, .width = 4 }).set(@intFromEnum(Prescaler.Prescale16));
-        const src_clock_fq = rcc.getOutputFrequency(translateClockSource(clock_source));
+        const src_clock_fq = obsolete_rcc.getOutputFrequency(translateClockSource(clock_source));
         const baud = @intFromEnum(baud_rate);
         const brr: u32 = ((2 * src_clock_fq / prescaler) + (baud / 2)) / baud;
         (Field{ .reg = self.getReg(.BRR), .shift = 0, .width = 16 }).set((brr & 0xFFF0) + ((brr & 0x0F) >> 1));
@@ -782,7 +782,7 @@ const DDR = struct {
 
     pub fn configure(self: *const DDR, comptime reg_values: RegValues) bool {
         pll2.enable(.R);
-        const ddritfcr = rcc.getReg(.DDRITFCR);
+        const ddritfcr = obsolete_rcc.getReg(.DDRITFCR);
         (Field{ .reg = ddritfcr, .shift = 8, .width = 1 }).set(0); // AXIDCGEN
 
         (Field{ .reg = ddritfcr, .shift = 14, .width = 1 }).set(1); // DDRCAPBRST
@@ -1057,11 +1057,11 @@ const MPU = struct {
     const PLL1Divider = enum(u3) { Div1 = 0, Div2 = 1, Div4 = 2, Div8 = 3, Div16 = 4 };
 
     pub fn configure(self: *const MPU, clock_source: ClockSource, pll1_div: ?PLL1Divider) void {
-        rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
+        obsolete_rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         if (clock_source == .PLL1DIV or clock_source == .PLL1)
             pll1.enable(.P);
         if (clock_source == .PLL1DIV) {
-            const divr = rcc.getReg(.MPCKDIVR);
+            const divr = obsolete_rcc.getReg(.MPCKDIVR);
             (Field{ .reg = divr, .shift = 0, .width = 3 }).set(@intFromEnum(pll1_div orelse .Div1));
             const rdy: Field = .{ .reg = divr, .shift = 31, .width = 1 };
             while (rdy.isCleared()) {}
@@ -1122,11 +1122,11 @@ const MPU = struct {
     }
 
     pub fn getSystemClockHz(self: *const MPU) BusType {
-        return switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
-            .HSI => rcc.getOutputFrequency(.HSI),
-            .HSE => rcc.getOutputFrequency(.HSE),
+        return switch (@as(ClockSource, @enumFromInt(obsolete_rcc.getMuxerValue(&self.mux)))) {
+            .HSI => obsolete_rcc.getOutputFrequency(.HSI),
+            .HSE => obsolete_rcc.getOutputFrequency(.HSE),
             .PLL1 => pll1.getOutputFrequency(.P),
-            .PLL1DIV => pll1.getOutputFrequency(.P) >> @truncate((Field{ .reg = rcc.getReg(.MPCKDIVR), .shift = 0, .width = 3 }).get()),
+            .PLL1DIV => pll1.getOutputFrequency(.P) >> @truncate((Field{ .reg = obsolete_rcc.getReg(.MPCKDIVR), .shift = 0, .width = 3 }).get()),
         };
     }
 };
@@ -1136,26 +1136,26 @@ const AXI = struct {
     const ClockSource = enum(u2) { HSI = 0, HSE = 1, PLL2 = 2, Gated };
     const Output = enum { ACLK, HCLK5, HCLK6, PCLK4, PCLK5 };
     pub fn configure(self: *const AXI, clock_source: ClockSource, prescaler: u3, apb4div: u3, apb5div: u3) void {
-        rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
+        obsolete_rcc.setMuxerValue(&self.mux, @intFromEnum(clock_source));
         if (clock_source == .PLL2)
             pll2.enable(.P);
-        (Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 0, .width = 3 }).set(prescaler);
-        while ((Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 31, .width = 1 }).isCleared()) {}
-        (Field{ .reg = rcc.getReg(.APB4DIVR), .shift = 0, .width = 3 }).set(apb4div);
-        while ((Field{ .reg = rcc.getReg(.APB4DIVR), .shift = 31, .width = 1 }).isCleared()) {}
-        (Field{ .reg = rcc.getReg(.APB5DIVR), .shift = 0, .width = 3 }).set(apb5div);
-        while ((Field{ .reg = rcc.getReg(.APB5DIVR), .shift = 31, .width = 1 }).isCleared()) {}
+        (Field{ .reg = obsolete_rcc.getReg(.AXIDIVR), .shift = 0, .width = 3 }).set(prescaler);
+        while ((Field{ .reg = obsolete_rcc.getReg(.AXIDIVR), .shift = 31, .width = 1 }).isCleared()) {}
+        (Field{ .reg = obsolete_rcc.getReg(.APB4DIVR), .shift = 0, .width = 3 }).set(apb4div);
+        while ((Field{ .reg = obsolete_rcc.getReg(.APB4DIVR), .shift = 31, .width = 1 }).isCleared()) {}
+        (Field{ .reg = obsolete_rcc.getReg(.APB5DIVR), .shift = 0, .width = 3 }).set(apb5div);
+        while ((Field{ .reg = obsolete_rcc.getReg(.APB5DIVR), .shift = 31, .width = 1 }).isCleared()) {}
     }
     pub fn getOutputFrequency(self: *const AXI, output: Output) BusType {
-        var ref_clock_hz: BusType = switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
-            .HSI => rcc.getOutputFrequency(.HSI),
-            .HSE => rcc.getOutputFrequency(.HSE),
+        var ref_clock_hz: BusType = switch (@as(ClockSource, @enumFromInt(obsolete_rcc.getMuxerValue(&self.mux)))) {
+            .HSI => obsolete_rcc.getOutputFrequency(.HSI),
+            .HSE => obsolete_rcc.getOutputFrequency(.HSE),
             .PLL2 => pll2.getOutputFrequency(.P),
             .Gated => return 0,
         };
 
-        while ((Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 31, .width = 1 }).isCleared()) {}
-        var prescaler = (Field{ .reg = rcc.getReg(.AXIDIVR), .shift = 0, .width = 3 }).get();
+        while ((Field{ .reg = obsolete_rcc.getReg(.AXIDIVR), .shift = 31, .width = 1 }).isCleared()) {}
+        var prescaler = (Field{ .reg = obsolete_rcc.getReg(.AXIDIVR), .shift = 0, .width = 3 }).get();
         if (prescaler > 3)
             prescaler = 3;
         ref_clock_hz /= (prescaler + 1);
@@ -1168,8 +1168,8 @@ const AXI = struct {
                     .PCLK5 => RCC.Reg.APB5DIVR,
                     else => unreachable,
                 };
-                while ((Field{ .reg = rcc.getReg(reg), .shift = 31, .width = 1 }).isCleared()) {}
-                var div = (Field{ .reg = rcc.getReg(reg), .shift = 0, .width = 3 }).get();
+                while ((Field{ .reg = obsolete_rcc.getReg(reg), .shift = 31, .width = 1 }).isCleared()) {}
+                var div = (Field{ .reg = obsolete_rcc.getReg(reg), .shift = 0, .width = 3 }).get();
                 if (div > 4)
                     div = 4;
                 return ref_clock_hz / (@as(BusType, 1) << @truncate(div));
@@ -1188,14 +1188,14 @@ const PLL = struct {
     const Output = enum(FieldShiftType) { P = 4, Q = 5, R = 6 };
     pub fn configure(self: *const PLL, comptime clock_source: ?ClockSource, m: u6, n: u9, fracv: u13, p: u7, q: u7, r: u7) void {
         if (clock_source) |src| {
-            rcc.setMuxerValue(&self.mux, @intFromEnum(src));
+            obsolete_rcc.setMuxerValue(&self.mux, @intFromEnum(src));
         }
 
-        const cfg1r = rcc.getReg(self.cfg1r);
-        const cfg2r = rcc.getReg(self.cfg2r);
-        const fracr = rcc.getReg(self.fracr);
+        const cfg1r = obsolete_rcc.getReg(self.cfg1r);
+        const cfg2r = obsolete_rcc.getReg(self.cfg2r);
+        const fracr = obsolete_rcc.getReg(self.fracr);
         const fracle: Field = .{ .reg = fracr, .shift = 16, .width = 1 };
-        const cr = rcc.getReg(self.cr);
+        const cr = obsolete_rcc.getReg(self.cr);
         const pllrdy: Field = .{ .reg = cr, .shift = 1, .width = 1, .rw = .ReadOnly };
         (Field{ .reg = cfg1r, .shift = 16, .width = 6 }).set(m);
         (Field{ .reg = cfg1r, .shift = 0, .width = 9 }).set(n);
@@ -1209,26 +1209,26 @@ const PLL = struct {
         while (pllrdy.isCleared()) {}
     }
     pub fn enable(self: *const PLL, output: Output) void {
-        (Field{ .reg = rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).set(1);
+        (Field{ .reg = obsolete_rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).set(1);
     }
     fn isOutputEnabled(self: *const PLL, output: Output) bool {
-        return (Field{ .reg = rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).isAsserted();
+        return (Field{ .reg = obsolete_rcc.getReg(self.cr), .shift = @intFromEnum(output), .width = 1 }).isAsserted();
     }
     pub fn getOutputFrequency(self: *const PLL, output: Output) BusType {
         if (!self.isOutputEnabled(output))
             return 0;
-        const divm = (Field{ .reg = rcc.getReg(self.cfg1r), .shift = 16, .width = 6 }).get();
-        const divn = (Field{ .reg = rcc.getReg(self.cfg1r), .shift = 0, .width = 9 }).get();
-        const frac = (Field{ .reg = rcc.getReg(self.fracr), .shift = 3, .width = 13 }).get();
+        const divm = (Field{ .reg = obsolete_rcc.getReg(self.cfg1r), .shift = 16, .width = 6 }).get();
+        const divn = (Field{ .reg = obsolete_rcc.getReg(self.cfg1r), .shift = 0, .width = 9 }).get();
+        const frac = (Field{ .reg = obsolete_rcc.getReg(self.fracr), .shift = 3, .width = 13 }).get();
         const div_out = switch (output) {
-            .P => (Field{ .reg = rcc.getReg(self.cfg2r), .shift = 0, .width = 7 }).get(),
-            .Q => (Field{ .reg = rcc.getReg(self.cfg2r), .shift = 8, .width = 7 }).get(),
-            .R => (Field{ .reg = rcc.getReg(self.cfg2r), .shift = 16, .width = 7 }).get(),
+            .P => (Field{ .reg = obsolete_rcc.getReg(self.cfg2r), .shift = 0, .width = 7 }).get(),
+            .Q => (Field{ .reg = obsolete_rcc.getReg(self.cfg2r), .shift = 8, .width = 7 }).get(),
+            .R => (Field{ .reg = obsolete_rcc.getReg(self.cfg2r), .shift = 16, .width = 7 }).get(),
         };
-        const ref_fq_hz = switch (@as(ClockSource, @enumFromInt(rcc.getMuxerValue(&self.mux)))) {
-            .HSI => rcc.getOutputFrequency(.HSI),
-            .HSE => rcc.getOutputFrequency(.HSE),
-            .CSI => rcc.getOutputFrequency(.CSI),
+        const ref_fq_hz = switch (@as(ClockSource, @enumFromInt(obsolete_rcc.getMuxerValue(&self.mux)))) {
+            .HSI => obsolete_rcc.getOutputFrequency(.HSI),
+            .HSE => obsolete_rcc.getOutputFrequency(.HSE),
+            .CSI => obsolete_rcc.getOutputFrequency(.CSI),
         } / (divm + 1) * 2;
         return ((ref_fq_hz / 1_000 * frac / 8192) * 1_000 + ref_fq_hz * (divn + 1)) / 2 / (div_out + 1);
     }
@@ -1246,8 +1246,8 @@ const TZC = struct {
     };
 
     pub fn initSecureDDRAccess(self: TZC) void {
-        rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 11 }); // TZC1EN
-        rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZC2EN
+        obsolete_rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 11 }); // TZC1EN
+        obsolete_rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZC2EN
         const openreq_flt0: Field = .{ .reg = self.getReg(.GATE_KEEPER), .shift = 0, .width = 1 };
         const openreq_flt1: Field = .{ .reg = self.getReg(.GATE_KEEPER), .shift = 1, .width = 1 };
         openreq_flt0.set(0); // Open
@@ -1258,7 +1258,7 @@ const TZC = struct {
         (Field{ .reg = self.getReg(.ATTRIBUTE0), .shift = 30, .width = 1 }).set(1); // S_RD_EN
         openreq_flt0.set(1); // Close
         openreq_flt1.set(1); // Close
-        rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZPCEN
+        obsolete_rcc.enablePeriphery(.{ .set_reg = .MP_APB5ENSETR, .shift = 12 }); // TZPCEN
         (Field{ .reg = self.getReg(.SPECULATION_CTRL), .shift = 0, .width = 1 }).set(1); // READSPEC_DISABLE
         (Field{ .reg = self.getReg(.SPECULATION_CTRL), .shift = 1, .width = 1 }).set(1); // WRITESPEC_DISABLE
     }
@@ -1466,7 +1466,7 @@ const GPIO = struct {
 
         pub fn configure(self: *const Pin, mode: MODE, otype: OTYPE, ospeed: OSPEED, pupd: PUPD, af: u4) void {
             if (mode == .AltFunc)
-                rcc.enablePeriphery(self.gpio.rcc_switch);
+                obsolete_rcc.enablePeriphery(self.gpio.rcc_switch);
             self.getMODER().set(@intFromEnum(mode));
             self.getOTYPER().set(@intFromEnum(otype));
             self.getOSPEEDR().set(@intFromEnum(ospeed));
