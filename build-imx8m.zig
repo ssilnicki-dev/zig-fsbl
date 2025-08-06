@@ -25,11 +25,23 @@ pub fn build(b: *std.Build, optimize: std.builtin.OptimizeMode) void {
     };
     const resolver_target = b.resolveTargetQuery(armv8a_target);
 
-    const fsbl_elf = b.addExecutable(.{
-        .name = "qs8m-fsbl",
+    const mod = b.addModule("qs8m-fsbl", .{
         .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/imx8m/ocram_part.zig" } },
         .target = resolver_target,
-        .optimize = optimize,
+    });
+
+    const fsbl_elf = b.addExecutable(.{
+        .name = "qs8m-fsbl",
+        .root_module = b.createModule(.{
+            .root_source_file = .{ .src_path = .{ .owner = b, .sub_path = "src/imx8m/ocram_part.zig" } },
+            .target = resolver_target,
+            .optimize = optimize,
+            .strip = false,
+            .unwind_tables = .none,
+            .imports = &.{
+                .{ .name = "qs8m-fsbl", .module = mod },
+            },
+        }),
     });
     fsbl_elf.setLinkerScript(.{ .src_path = .{ .owner = b, .sub_path = "src/imx8m/ocram_part.ld" } });
 

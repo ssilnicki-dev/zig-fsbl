@@ -170,7 +170,8 @@ const SDMMC = struct {
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
     app_cmd_addr: u32 = 0,
-    usingnamespace PeripheryCommon(@This(), Reg);
+    const common = PeripheryCommon(@This(), Reg);
+    const getReg = common.getReg;
 
     pub const Error = error{
         Unsupported,
@@ -638,7 +639,8 @@ const UART = struct {
     idx: comptime_int,
     mux: RCC.ClockMuxer,
     rcc_switch: RCC.PeripherySwitch,
-    usingnamespace PeripheryCommon(@This(), Reg);
+    const common = PeripheryCommon(@This(), Reg);
+    const getReg = common.getReg;
 
     const ClockSource = enum { HSI }; // TODO: add support for other clock sources
     const Reg = enum(BusType) {
@@ -1083,8 +1085,8 @@ const MPU = struct {
     }
     pub inline fn resetCycleCounter(self: *const MPU) void {
         _ = self;
-        asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: "r0"); // reset cycle counter
-        asm volatile ("mrc p15, 0, r0, c9, c12, 1; orr r0, r0, #0x80000000; mcr p15, 0, r0, c9, c12, 1;" ::: "r0"); // enable cycle counter
+        asm volatile ("mrc p15, 0, r0, c9, c12, 0; orr r0, r0, #5; mcr p15, 0, r0, c9, c12, 0" ::: .{ .r0 = true }); // reset cycle counter
+        asm volatile ("mrc p15, 0, r0, c9, c12, 1; orr r0, r0, #0x80000000; mcr p15, 0, r0, c9, c12, 1;" ::: .{ .r0 = true }); // enable cycle counter
     }
 
     pub fn getSystemClockHz(self: *const MPU) BusType {
@@ -1202,7 +1204,8 @@ const PLL = struct {
 
 const TZC = struct {
     port: BusType,
-    usingnamespace PeripheryCommon(@This(), Reg);
+    const common = PeripheryCommon(@This(), Reg);
+    const getReg = common.getReg;
     const Reg = enum(BusType) {
         GATE_KEEPER = 0x8,
         SPECULATION_CTRL = 0xC,
@@ -1231,7 +1234,8 @@ const TZC = struct {
 
 const RCC = struct {
     port: BusType,
-    usingnamespace PeripheryCommon(@This(), Reg);
+    const common = PeripheryCommon(@This(), Reg);
+    pub const getReg = common.getReg;
     const ClockSource = enum { HSI, HSE, CSI };
     const ClockMuxer = struct {
         src: FieldDesc,
@@ -1371,7 +1375,8 @@ const RCC = struct {
 const GPIO = struct {
     port: BusType,
     rcc_switch: RCC.PeripherySwitch,
-    usingnamespace PeripheryCommon(@This(), Reg);
+    const common = PeripheryCommon(@This(), Reg);
+    pub const getReg = common.getReg;
     const Reg = enum(BusType) {
         MODER = 0x0,
         OTYPER = 0x4,
