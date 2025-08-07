@@ -1264,6 +1264,42 @@ const TZC = struct {
     }
 };
 
+pub const SYSCFG = struct { // System Configuration Controller: 1092[1]
+    port: BusType,
+    rcc: *const RCC,
+    const reg = PeripheryCommon(@This(), Reg).reg;
+    const Reg = enum(BusType) {
+        BOOTR = 0x0, // boot pins control register: 1095[1]
+        ICNR = 0x1C, // interconnect control register: 1104[1]
+        CMPCR = 0x20, // compensation cell control register: 1106[1]
+        CMPENSETR = 0x24, // compensation cell enable register: 1107[1]
+    };
+    const ICNR_BIT = enum(FieldShiftType) {
+        AXI_M9 = 9, // DDR access port: 1104[1]
+    };
+    const AXIMatrixMaster = enum(u4) { // 127[1]
+        LTDC = @intFromEnum(ICNR_BIT.AXI_M9),
+    };
+    pub fn interconnect(self: *const SYSCFG, master: AXIMatrixMaster, ddr_port: enum(u1) { AXI_DDR1 = 0, AXI_DDR2 = 1 }) void {
+        self.reg(.ICNR).field(@intFromEnum(master), u1, .ReadWrite).set(@intFromEnum(ddr_port));
+    }
+    pub noinline fn disableBootPinsPullDown(self: *const SYSCFG) void {
+        const bootr = self.reg(.BOOTR);
+        const vdd_pins = bootr.field(0, u3, .ReadOnly).get(); // BOOT0, BOOT1 & BOOT2 pin status: 1095[1]
+        bootr.field(4, u3, .ReadWrite).set(vdd_pins); // BOOT0, BOOT1 & BOOT2 pull down disable: 1095[1]
+    }
+    pub noinline fn ioCompensationStart(self: *const SYSCFG) void {
+        self.rcc.enableClock(.CSI);
+        self.rcc.enableClock(.SYSCFG);
+        self.reg(.CMPENSETR).bit(0, .ReadWrite).set(); // MPU_EN, compensation cell enable for MPU: 1107[1]
+
+    }
+    pub fn ioCompensationFinish(self: *const SYSCFG) void {
+        const ready = self.reg(.CMPCR).bit(8, .ReadOnly);
+        while (ready.isCleared()) {}
+    }
+};
+
 pub const PWR = struct { // Power Control: 436[1]
     port: BusType,
     const reg = PeripheryCommon(@This(), Reg).reg;
@@ -1297,6 +1333,21 @@ pub const RCC = struct {
         set_reg: Reg,
         clr_reg: ?Reg = null,
         shift: FieldShiftType,
+    };
+
+    pub inline fn enableClock(self: *const RCC, clock: Clock) void {
+        clock.enable(self);
+    }
+
+    const Clock = enum {
+        CSI,
+        SYSCFG,
+        noinline fn enable(self: Clock, rcc: *const RCC) void {
+            switch (self) {
+                .SYSCFG => rcc.reg(.MP_APB3ENSETR).bit(11, .ReadWrite).set(),
+                .CSI => rcc.enableCSI(),
+            }
+        }
     };
 
     const HSEMode = enum { Crystal };
@@ -1432,6 +1483,7 @@ pub const RCC = struct {
         UART24CKSELR = 0x8E8, // RCC UART2,4 kernel clock selection register (RCC_UART24CKSELR)
         SDMMC12CKSELR = 0x8F4, // RCC SDMMC1 and 2 kernel clock selection register
         MP_APB1ENSETR = 0xA00, // RCC APB1 peripheral enable for MPU set register (RCC_MP_APB1ENSETR)
+        MP_APB3ENSETR = 0xA10, // RCC APB3 peripheral enable for MPU set register: 813[1]
         MP_AHB4ENSETR = 0xA28, // RCC AHB4 peripheral enable for MPU set register (RCC_MP_AHB4ENSETR)
         MP_AHB4ENCLRR = 0xA2C, // RCC AHB4 peripheral enable for MPU clear register (RCC_MP_AHB4ENCLRR)
     };
