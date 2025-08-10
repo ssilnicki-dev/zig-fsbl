@@ -1264,6 +1264,33 @@ const TZC = struct {
     }
 };
 
+pub const IWDG = struct {
+    port: BusType,
+    const common = PeripheryCommon(@This(), Reg);
+    pub const getReg = common.getReg;
+    pub const reg = common.reg;
+
+    const Reg = enum(BusType) {
+        KR = 0x0,
+        PR = 0x4,
+        RLR = 0x8,
+        SR = 0xC,
+    };
+
+    const Prescaler = enum(u3) { Div4 = 0, Div8, Div16, Div32, Div64, Div128, Div256 };
+
+    pub fn start(self: *const IWDG, reload: u12, prescaler: Prescaler) void {
+        self.reg(.KR).set(0x5555);
+        self.reg(.PR).field(0, u3, .ReadWrite).set(@as(BusType, @intFromEnum(prescaler)));
+        self.reg(.RLR).field(0, u12, .ReadWrite).set(@as(BusType, reload));
+        self.reg(.KR).set(0xCCCC);
+    }
+
+    pub fn refresh(self: *const IWDG) void {
+        self.reg(.KR).set(0xAAAA);
+    }
+};
+
 pub const SYSCFG = struct { // System Configuration Controller: 1092[1]
     port: BusType,
     clock: RCC.Clock = .SYSCFG,
@@ -1358,6 +1385,12 @@ pub const RCC = struct {
         self.reg(.OCENSETR).bit(4, .ReadWrite).set(); // CSION: 643[1]
         const csirdy = self.reg(.OCRDYR).bit(4, .ReadOnly); // CSIRDY: 646[1]
         while (csirdy.isCleared()) {}
+    }
+
+    noinline fn enableLSI(self: *const RCC) void {
+        self.reg(.RDLSENSETR).bit(0, .ReadWrite).set(); // LSION
+        const lsirdy = self.reg(.RDLSSR).bit(0, .ReadOnly); // LSIRDY
+        while (lsirdy.isCleared()) {}
     }
 
     pub fn enableHSE(self: *const RCC, mode: HSEMode, fq: u32) void {
@@ -1464,6 +1497,8 @@ pub const RCC = struct {
         PLL2CSGR = 0xA4, // RCC PLL2 clock spreading generator register (RCC_PLL2CSGR)
         DDRITFCR = 0xD8, // RCC DDR interface control register (RCC_DDRITFCR)
         BDCR = 0x140, // RCC backup domain control register: 733[1]
+        RDLSENSETR = 0x150, // RCC reset domain LSI enable set register
+        RDLSSR = 0x158, // RCC reset domain LSI status register
         AHB6RSTSETR = 0x198, // RCC AHB6 peripheral reset set register (RCC_AHB6RSTSETR)
         AHB6RSTCLRR = 0x19C, // RCC AHB6 peripheral reset set register (RCC_AHB6RSTSETR)
         MP_APB5ENSETR = 0x208, // RCC APB5 peripheral enable for MPU set register

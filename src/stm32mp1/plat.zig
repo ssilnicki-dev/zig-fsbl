@@ -3,15 +3,18 @@ const stm32mp157c = @import("stm32mp157c.zig");
 const PWR = stm32mp157c.PWR;
 const RCC = stm32mp157c.RCC;
 const SYSCFG = stm32mp157c.SYSCFG;
+const IWDG = stm32mp157c.IWDG;
 
 var pwr: PWR = undefined;
 var rcc: RCC = undefined;
 var syscfg: SYSCFG = undefined;
+var iwdg1: IWDG = undefined;
 
 fn mapPeriphery() void {
     pwr = PWR{ .port = arch.mapPeriphery(0x50001000, 1024) catch |e| panic(@src().line, e) };
     rcc = RCC{ .port = arch.mapPeriphery(0x50000000, 4096) catch |e| panic(@src().line, e) };
     syscfg = SYSCFG{ .rcc = &rcc, .port = arch.mapPeriphery(0x50020000, 1024) catch |e| panic(@src().line, e) };
+    iwdg1 = IWDG{ .port = arch.mapPeriphery(0x5C003000, 1024) catch |e| panic(@src().line, e) };
 }
 
 pub export fn Initialize() void {
@@ -24,7 +27,8 @@ pub export fn Initialize() void {
     syscfg.interconnect(.LTDC, .AXI_DDR2);
     syscfg.disableBootPinsPullDown();
     syscfg.ioCompensationStart();
-    // TODO: setup iwdg
+    rcc.enableLSI();
+    iwdg1.start(0xFFF, .Div256);
     syscfg.ioCompensationFinish();
 }
 
