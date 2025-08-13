@@ -20,12 +20,17 @@ pub export fn Initialize() void {
     if (rcc.getRTCSource() == .NoClock) { // Coldboot
         rcc.resetVSwitchDomain();
     }
-    // TODO: setup clocks/dividers/plls/muxers -> mostly refactoring
+    initializeClocks();
+    // TODO: setup clocks/dividers/plls/muxers -> mostly refactoring. Done: HSE
     syscfg.interconnect(.LTDC, .AXI_DDR2);
     syscfg.disableBootPinsPullDown();
     syscfg.ioCompensationStart();
     // TODO: setup iwdg
     syscfg.ioCompensationFinish();
+}
+
+inline fn initializeClocks() void {
+    rcc.enableClock(.HSE_24MHz);
 }
 
 noinline fn panic(line: u32, err: anyerror) noreturn {

@@ -1342,10 +1342,12 @@ pub const RCC = struct {
     const Clock = enum {
         CSI,
         SYSCFG,
+        HSE_24MHz,
         noinline fn enable(self: Clock, rcc: *const RCC) void {
             switch (self) {
                 .SYSCFG => rcc.reg(.MP_APB3ENSETR).bit(11, .ReadWrite).set(),
                 .CSI => rcc.enableCSI(),
+                .HSE_24MHz => rcc.enableHSE(.Crystal, 24_000_000),
             }
         }
     };
@@ -1359,16 +1361,16 @@ pub const RCC = struct {
         while (csirdy.isCleared()) {}
     }
 
-    pub fn enableHSE(self: *const RCC, mode: HSEMode, fq: u32) void {
+    fn enableHSE(self: *const RCC, mode: HSEMode, fq: u32) void {
         hse_fq_hz = fq;
         switch (mode) {
             .Crystal => {
-                const ocenclrr = self.getReg(.OCENCLRR);
-                (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> Off
-                const hserdy: Field = .{ .reg = self.getReg(.OCRDYR), .rw = .ReadOnly, .shift = 8, .width = 1 };
+                const ocenclrr = self.reg(.OCENCLRR);
+                ocenclrr.bit(8, .WriteOnly).set(); // HSEON: Clear of HSEON bit: 644[1]
+                const hserdy = self.reg(.OCRDYR).bit(8, .ReadOnly); // HSERDY: HSE clock ready flag: 646[1]
                 while (hserdy.isAsserted()) {}
-                (Field{ .reg = ocenclrr, .rw = .WriteOnly, .shift = 10, .width = 1 }).set(1); // HSEBYP -> Off
-                (Field{ .reg = self.getReg(.OCENSETR), .rw = .WriteOnly, .shift = 8, .width = 1 }).set(1); // HSE -> On
+                ocenclrr.bit(10, .WriteOnly).set(); // HSEBYP: disable bypass mode: 644[1]
+                self.reg(.OCENSETR).bit(8, .WriteOnly).set(); // HSEON: enable HSE: 642[1]
                 while (hserdy.isCleared()) {}
             },
         }
@@ -1441,7 +1443,7 @@ pub const RCC = struct {
 
     const Reg = enum(BusType) {
         OCENSETR = 0x0C, // RCC oscillator clock enable set register: 642[1]
-        OCENCLRR = 0x10, // RCC oscillator clock enable clear register (RCC_OCENCLRR)
+        OCENCLRR = 0x10, // RCC oscillator clock enable clear register: 644[1]
         HSICFGR = 0x18, // RCC HSI configuration register (RCC_HSICFGR)
         MPCKSELR = 0x20, // RCC MPU clock selection register (RCC_MPCKSELR)
         ASSCKSELR = 0x24, // RCC AXI sub-system clock selection register (RCC_ASSCKSELR)

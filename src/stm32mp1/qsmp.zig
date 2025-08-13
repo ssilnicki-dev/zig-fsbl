@@ -20,7 +20,7 @@ fn writer(nt: @TypeOf(void{})) Writer {
 
 pub fn rccMpuAxiDdrInit() void {
     // RCC init
-    bus.obsolete_rcc.enableHSE(.Crystal, 24_000_000);
+    bus.obsolete_rcc.enableClock(.HSE_24MHz);
 
     // MPU clock source
     bus.pll1.configure(.HSE, 2, 80, 2048, 0, 1, 1); // 650 MHz for MPU
